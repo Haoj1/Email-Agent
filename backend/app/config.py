@@ -23,12 +23,13 @@ class Settings(BaseSettings):
     GOOGLE_REDIRECT_URI: str = "http://localhost:5001/api/auth/google/callback"
     
     # Database (PostgreSQL)
+    # Local development defaults (override in .env for production)
     DATABASE_URL: str = ""
-    DATABASE_HOST: str = ""
+    DATABASE_HOST: str = "localhost"  # Default to localhost for local development
     DATABASE_PORT: int = 5432
     DATABASE_NAME: str = "email_agent"
-    DATABASE_USER: str = "postgres"
-    DATABASE_PASSWORD: str = ""
+    DATABASE_USER: str = "postgres"  # Change to your system username if using peer auth
+    DATABASE_PASSWORD: str = ""  # Leave empty if using peer authentication
     # For Cloud SQL, use connection name: PROJECT_ID:REGION:INSTANCE_ID
     DATABASE_CONNECTION_NAME: str = ""
     

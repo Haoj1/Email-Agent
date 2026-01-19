@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 from app.config import settings
-from app.routes import auth, health
+from app.routes import auth, health, emails, gmail
 
 app = FastAPI(
     title="Email Agent API",
@@ -24,6 +24,8 @@ app.add_middleware(
 # Include routers
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(emails.router, prefix="/api", tags=["emails"])
+app.include_router(gmail.router, prefix="/api", tags=["gmail"])
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):

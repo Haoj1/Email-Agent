@@ -135,9 +135,54 @@ The frontend will run on `http://localhost:3000`
 - ✅ Service layer structure (Gmail, Calendar)
 - ✅ Email display with details (subject, from, date, snippet)
 
+## Database Setup
+
+### Local PostgreSQL (Recommended for Development)
+
+For local development, use a local PostgreSQL database (free and fast):
+
+1. **Install PostgreSQL** (macOS):
+   ```bash
+   brew install postgresql@15
+   brew services start postgresql@15
+   ```
+
+2. **Create database**:
+   ```bash
+   createdb email_agent
+   ```
+
+3. **Configure `.env`** in `backend/` directory:
+   ```env
+   DATABASE_HOST=localhost
+   DATABASE_PORT=5432
+   DATABASE_NAME=email_agent
+   DATABASE_USER=postgres
+   DATABASE_PASSWORD=your_password
+   ```
+
+4. **Install dependencies and test**:
+   ```bash
+   cd backend
+   pip install -r requirements.txt
+   python test_db_connection.py
+   ```
+
+5. **Initialize database**:
+   ```bash
+   python init_database.py
+   ```
+
+📖 **Detailed guide**: See [backend/LOCAL_DATABASE_SETUP.md](./backend/LOCAL_DATABASE_SETUP.md)
+
+### GCP Cloud SQL (For Production)
+
+For production deployment, use GCP Cloud SQL:
+📖 See [backend/GCP_DATABASE_SETUP.md](./backend/GCP_DATABASE_SETUP.md)
+
 ## Next Steps
 
-- [ ] Database setup (PostgreSQL)
+- [x] Database setup (PostgreSQL) - Use local for development
 - [ ] Token storage in database
 - [ ] LangGraph agent implementation
   - [ ] Email triage agent

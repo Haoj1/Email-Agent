@@ -122,3 +122,5 @@ temp/
 .langchain/
 .langgraph/
 backend/GCP_DATABASE_SETUP.md
+backend/RAG_SETUP.md
+backend/LOCAL_DATABASE_SETUP.md

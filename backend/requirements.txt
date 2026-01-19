@@ -16,6 +16,14 @@ langgraph
 langchain-core
 httpx==0.25.2
 aiofiles==23.2.1
-sqlalchemy==2.0.23
-asyncpg==0.29.0
+# SQLAlchemy 2.0.23 has compatibility issues with Python 3.13
+# Upgrade to 2.0.36+ for Python 3.13 support
+sqlalchemy>=2.0.36
+# Option 1: psycopg 3.x (async, recommended for Python 3.13)
+psycopg[binary,pool]>=3.2.0
+greenlet>=3.0.0  # Required for psycopg async operations
+# Option 2: psycopg2-binary (sync, more stable, use with asyncio.to_thread)
+# psycopg2-binary==2.9.9
+# Option 3: asyncpg (if you downgrade to Python 3.12 or wait for update)
+# asyncpg==0.29.0
 alembic==1.12.1

@@ -3,12 +3,17 @@ Database connection and session management for PostgreSQL
 """
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+from sqlalchemy import text
 from sqlalchemy.pool import NullPool
 from app.config import settings
 import os
 
 # Base class for models
 Base = declarative_base()
+
+# Import models to register them with Base.metadata
+# This ensures tables are created when init_db() is called
+from app import models  # noqa: F401, E402
 
 # Database URL construction
 def get_database_url() -> str:
@@ -23,27 +28,27 @@ def get_database_url() -> str:
     # Construct from individual settings
     if settings.DATABASE_CONNECTION_NAME:
         # Cloud SQL connection (Unix socket or Cloud SQL Proxy)
-        # Format: postgresql+asyncpg://USER:PASSWORD@/DATABASE?host=/cloudsql/CONNECTION_NAME
+        # Format: postgresql+psycopg://USER:PASSWORD@/DATABASE?host=/cloudsql/CONNECTION_NAME
         if settings.DATABASE_PASSWORD:
             return (
-                f"postgresql+asyncpg://{settings.DATABASE_USER}:{settings.DATABASE_PASSWORD}"
+                f"postgresql+psycopg://{settings.DATABASE_USER}:{settings.DATABASE_PASSWORD}"
                 f"@/{settings.DATABASE_NAME}?host=/cloudsql/{settings.DATABASE_CONNECTION_NAME}"
             )
         else:
             return (
-                f"postgresql+asyncpg://{settings.DATABASE_USER}"
+                f"postgresql+psycopg://{settings.DATABASE_USER}"
                 f"@/{settings.DATABASE_NAME}?host=/cloudsql/{settings.DATABASE_CONNECTION_NAME}"
             )
     else:
         # Direct TCP connection
         if settings.DATABASE_PASSWORD:
             return (
-                f"postgresql+asyncpg://{settings.DATABASE_USER}:{settings.DATABASE_PASSWORD}"
+                f"postgresql+psycopg://{settings.DATABASE_USER}:{settings.DATABASE_PASSWORD}"
                 f"@{settings.DATABASE_HOST}:{settings.DATABASE_PORT}/{settings.DATABASE_NAME}"
             )
         else:
             return (
-                f"postgresql+asyncpg://{settings.DATABASE_USER}"
+                f"postgresql+psycopg://{settings.DATABASE_USER}"
                 f"@{settings.DATABASE_HOST}:{settings.DATABASE_PORT}/{settings.DATABASE_NAME}"
             )
 
@@ -84,4 +89,14 @@ async def init_db():
     Call this on application startup.
     """
     async with engine.begin() as conn:
+        # Enable pgvector extension for RAG support (if needed)
+        # This will be ignored if extension doesn't exist or is already enabled
+        try:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+            print("✅ pgvector extension enabled (for RAG support)")
+        except Exception as e:
+            print(f"⚠️  pgvector extension not available: {e}")
+            print("   (This is OK if you're not using RAG features yet)")
+        
+        # Create all tables
         await conn.run_sync(Base.metadata.create_all)

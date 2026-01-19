@@ -13,10 +13,16 @@ function AuthCallback() {
     const success = searchParams.get('success');
     const error = searchParams.get('error');
     const email = searchParams.get('email');
+    const userId = searchParams.get('user_id');
+    const action = searchParams.get('action');
 
     if (success === 'true') {
       setStatus('success');
-      setMessage(`Successfully authenticated as ${email}`);
+      if (action === 'add_email') {
+        setMessage(`Successfully added email: ${email}`);
+      } else {
+        setMessage(`Successfully authenticated as ${email}`);
+      }
       // Redirect to dashboard after 2 seconds
       setTimeout(() => {
         navigate('/dashboard');
