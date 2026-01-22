@@ -317,6 +317,19 @@ async def logout(request: Request):
     response.delete_cookie("session_id")
     return response
 
+
+async def get_current_user_id(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+) -> int:
+    """
+    Dependency function to get current authenticated user ID
+    Used by other routes that need user_id (e.g., triage.py)
+    """
+    user = await get_current_user(request, db)
+    return user["user_id"]
+
+
 async def get_user_credentials(
     request: Request,
     email: Optional[str] = None,

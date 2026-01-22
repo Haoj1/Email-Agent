@@ -33,8 +33,18 @@ class Settings(BaseSettings):
     # For Cloud SQL, use connection name: PROJECT_ID:REGION:INSTANCE_ID
     DATABASE_CONNECTION_NAME: str = ""
     
-    # OpenAI API (for LangChain agents)
+    # LLM API Configuration (for LangChain agents)
+    # DeepSeek (recommended for cost efficiency)
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
+    DEEPSEEK_MODEL: str = "deepseek-chat"  # deepseek-chat (V3) or deepseek-reasoner (R1)
+    
+    # OpenAI API (optional, as fallback)
     OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o-mini"  # gpt-4o-mini, gpt-4o, etc.
+    
+    # LLM Provider Selection
+    LLM_PROVIDER: str = "deepseek"  # "deepseek" or "openai"
     
     class Config:
         env_file = ".env"

@@ -3,14 +3,17 @@ Gmail API routes - email query and management
 """
 from fastapi import APIRouter, HTTPException, Depends, Query, Request, Body
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from typing import Optional, List
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 from app.database import get_db
-from app.routes.auth import get_user_credentials
+from app.routes.auth import get_user_credentials, get_current_user_id
 from app.services.gmail_service import GmailService
+from app.models import UserEmail
 
 router = APIRouter()
 
@@ -121,69 +124,131 @@ async def get_thread_detail(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Get detailed information about a specific email thread
+    Get detailed information about a specific email thread.
+    If thread is not found with the specified email, tries all user's email accounts.
     """
-    try:
-        # Get credentials
-        credentials = await get_user_credentials(request, email, db)
-        service = build('gmail', 'v1', credentials=credentials)
-        
-        thread = service.users().threads().get(
-            userId='me',
-            id=thread_id,
-            format='full'
-        ).execute()
-        
-        messages = thread.get('messages', [])
-        message_list = []
-        
-        for msg in messages:
-            headers = msg.get('payload', {}).get('headers', [])
-            from_header = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
-            to_header = next((h['value'] for h in headers if h['name'] == 'To'), 'Unknown')
-            subject_header = next((h['value'] for h in headers if h['name'] == 'Subject'), '(No Subject)')
-            date_header = next((h['value'] for h in headers if h['name'] == 'Date'), 'Unknown')
+    user_id = await get_current_user_id(request, db)
+    
+    # Get all user's email accounts
+    result = await db.execute(
+        select(UserEmail).where(UserEmail.user_id == user_id)
+    )
+    user_emails = result.scalars().all()
+    
+    if not user_emails:
+        raise HTTPException(status_code=404, detail="No email accounts found")
+    
+    # Sort emails: specified email first, then primary, then others
+    email_list = []
+    if email:
+        for ue in user_emails:
+            if ue.email == email:
+                email_list.insert(0, ue.email)
+            elif ue.is_primary and email not in email_list:
+                email_list.append(ue.email)
+            elif ue.email not in email_list:
+                email_list.append(ue.email)
+    else:
+        # Primary first, then others
+        for ue in user_emails:
+            if ue.is_primary:
+                email_list.insert(0, ue.email)
+            else:
+                email_list.append(ue.email)
+    
+    # Try each email account until we find the thread
+    last_error = None
+    for email_account in email_list:
+        try:
+            # Get credentials for this email
+            credentials = await get_user_credentials(request, email_account, db)
+            service = build('gmail', 'v1', credentials=credentials)
             
-            # Get message body
-            body = ""
-            payload = msg.get('payload', {})
-            if 'parts' in payload:
-                for part in payload['parts']:
-                    if part.get('mimeType') == 'text/plain':
-                        body_data = part.get('body', {}).get('data', '')
-                        if body_data:
-                            import base64
-                            body = base64.urlsafe_b64decode(body_data).decode('utf-8', errors='ignore')
-                            break
-            elif payload.get('mimeType') == 'text/plain':
-                body_data = payload.get('body', {}).get('data', '')
-                if body_data:
-                    import base64
-                    body = base64.urlsafe_b64decode(body_data).decode('utf-8', errors='ignore')
+            # Try to get thread
+            thread = service.users().threads().get(
+                userId='me',
+                id=thread_id,
+                format='full'
+            ).execute()
             
-            message_list.append({
-                "message_id": msg['id'],
-                "from": from_header,
-                "to": to_header,
-                "subject": subject_header,
-                "date": date_header,
-                "snippet": msg.get('snippet', ''),
-                "body": body,
-                "label_ids": msg.get('labelIds', [])
-            })
-        
-        return {
-            "success": True,
-            "thread_id": thread_id,
-            "message_count": len(messages),
-            "messages": message_list
-        }
-    except Exception as e:
-        error_str = str(e)
-        print(f"Error getting thread detail: {e}")
+            # Success! Process and return
+            messages = thread.get('messages', [])
+            message_list = []
+            
+            for msg in messages:
+                headers = msg.get('payload', {}).get('headers', [])
+                from_header = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
+                to_header = next((h['value'] for h in headers if h['name'] == 'To'), 'Unknown')
+                subject_header = next((h['value'] for h in headers if h['name'] == 'Subject'), '(No Subject)')
+                date_header = next((h['value'] for h in headers if h['name'] == 'Date'), 'Unknown')
+                
+                # Get message body
+                body = ""
+                payload = msg.get('payload', {})
+                if 'parts' in payload:
+                    for part in payload['parts']:
+                        if part.get('mimeType') == 'text/plain':
+                            body_data = part.get('body', {}).get('data', '')
+                            if body_data:
+                                import base64
+                                body = base64.urlsafe_b64decode(body_data).decode('utf-8', errors='ignore')
+                                break
+                elif payload.get('mimeType') == 'text/plain':
+                    body_data = payload.get('body', {}).get('data', '')
+                    if body_data:
+                        import base64
+                        body = base64.urlsafe_b64decode(body_data).decode('utf-8', errors='ignore')
+                
+                message_list.append({
+                    "message_id": msg['id'],
+                    "from": from_header,
+                    "to": to_header,
+                    "subject": subject_header,
+                    "date": date_header,
+                    "snippet": msg.get('snippet', ''),
+                    "body": body,
+                    "label_ids": msg.get('labelIds', [])
+                })
+            
+            return {
+                "success": True,
+                "thread_id": thread_id,
+                "message_count": len(messages),
+                "messages": message_list,
+                "email_account": email_account  # Return which email account was used
+            }
+            
+        except HttpError as e:
+            # If 404, try next email account
+            if e.resp.status == 404:
+                last_error = e
+                continue
+            # For other HTTP errors, raise immediately
+            raise HTTPException(
+                status_code=e.resp.status,
+                detail=f"Gmail API error: {str(e)}"
+            )
+        except Exception as e:
+            # For non-HTTP errors, try next email account but remember the error
+            last_error = e
+            continue
+    
+    # If we get here, thread was not found in any email account
+    if last_error:
+        if isinstance(last_error, HttpError) and last_error.resp.status == 404:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Thread {thread_id} not found in any of your email accounts"
+            )
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to get thread detail: {str(last_error)}"
+            )
+    else:
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get thread detail: {error_str}"
+            status_code=404,
+            detail=f"Thread {thread_id} not found"
         )
 
 

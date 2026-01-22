@@ -1,0 +1,269 @@
+.thread-detail-container {
+  min-height: 100vh;
+  background: #f5f5f5;
+  position: relative;
+  padding-right: 0;
+  transition: padding-right 0.3s ease;
+}
+
+.thread-chat-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.1);
+  z-index: 999;
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .thread-chat-overlay {
+    display: block;
+  }
+}
+
+.thread-header {
+  background: white;
+  padding: 20px 24px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.btn-back {
+  background: none;
+  border: none;
+  color: #1976d2;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 8px 0;
+  margin-bottom: 12px;
+  transition: color 0.2s;
+}
+
+.btn-back:hover {
+  color: #1565c0;
+  text-decoration: underline;
+}
+
+.thread-header h1 {
+  font-size: 20px;
+  color: #333;
+  margin: 0 0 8px 0;
+  font-weight: 500;
+}
+
+.thread-info {
+  color: #666;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.btn-chat {
+  background: #1976d2;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-chat:hover {
+  background: #1565c0;
+}
+
+.thread-content {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.message-item {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border-left: 4px solid transparent;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.message-item:hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.message-item.unread {
+  border-left-color: #1976d2;
+  background: #f8f9fa;
+}
+
+.message-item.unread::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: #1976d2;
+  border-radius: 8px 0 0 8px;
+}
+
+.message-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.message-from {
+  flex: 1;
+}
+
+.sender-name {
+  font-weight: 600;
+  color: #333;
+  font-size: 15px;
+  margin-right: 8px;
+}
+
+.sender-email {
+  color: #666;
+  font-size: 14px;
+}
+
+.message-date {
+  color: #666;
+  font-size: 13px;
+  white-space: nowrap;
+  margin-left: 16px;
+}
+
+.message-recipients {
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #666;
+}
+
+.recipient-line {
+  margin-bottom: 4px;
+}
+
+.message-labels {
+  margin-bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.label-tag {
+  background: #e3f2fd;
+  color: #1976d2;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.message-body {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.body-text {
+  color: #333;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.body-text a {
+  color: #1976d2;
+  text-decoration: none;
+}
+
+.body-text a:hover {
+  text-decoration: underline;
+}
+
+.body-snippet {
+  color: #666;
+  font-size: 13px;
+  font-style: italic;
+}
+
+.loading {
+  text-align: center;
+  padding: 60px 20px;
+  color: #666;
+  font-size: 16px;
+}
+
+.error-message {
+  max-width: 600px;
+  margin: 60px auto;
+  padding: 40px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.error-message h2 {
+  color: #d32f2f;
+  margin-bottom: 16px;
+}
+
+.error-message p {
+  color: #666;
+  margin-bottom: 24px;
+}
+
+.btn-primary {
+  background: #1976d2;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.btn-primary:hover {
+  background: #1565c0;
+}
+
+@media (max-width: 768px) {
+  .thread-content {
+    padding: 16px;
+  }
+
+  .message-header {
+    flex-direction: column;
+  }
+
+  .message-date {
+    margin-left: 0;
+    margin-top: 8px;
+  }
+
+  .thread-header h1 {
+    font-size: 18px;
+  }
+}

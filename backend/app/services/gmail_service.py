@@ -262,7 +262,46 @@ class GmailService:
             thread_id: Optional thread ID for reply
         
         Returns:
-            Draft dictionary
+            Draft dictionary with draft ID and other info
         """
-        # TODO: Implement draft creation
-        pass
+        from email.message import EmailMessage
+        
+        # Create email message
+        message = EmailMessage()
+        message.set_content(body)
+        message['To'] = to
+        message['Subject'] = subject
+        
+        # Encode message
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+        
+        # Build draft body
+        draft_body = {
+            'message': {
+                'raw': raw_message
+            }
+        }
+        
+        # Add thread_id if provided (for replies)
+        if thread_id:
+            draft_body['message']['threadId'] = thread_id
+        
+        # Create draft via Gmail API
+        try:
+            draft = self.service.users().drafts().create(
+                userId='me',
+                body=draft_body
+            ).execute()
+            
+            return {
+                "success": True,
+                "draft_id": draft.get('id'),
+                "message_id": draft.get('message', {}).get('id'),
+                "thread_id": draft.get('message', {}).get('threadId'),
+                "draft": draft
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
