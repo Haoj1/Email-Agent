@@ -125,3 +125,4 @@ backend/GCP_DATABASE_SETUP.md
 backend/RAG_SETUP.md
 backend/LOCAL_DATABASE_SETUP.md
 prd.md
+TESTING_GUIDE.md
