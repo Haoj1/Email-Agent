@@ -44,6 +44,15 @@ class DraftRequest(BaseModel):
     save_to_gmail: Optional[bool] = False  # Whether to save to Gmail Draft
 
 
+class SaveDraftRequest(BaseModel):
+    """Request model for saving existing draft to Gmail"""
+    thread_id: str
+    subject: str
+    body: str
+    to: str
+    email: Optional[str] = None
+
+
 class DraftResponse(BaseModel):
     """Response model for draft generation"""
     success: bool
@@ -166,9 +175,10 @@ async def stream_chat_response(
                 new_steps = steps_list[last_step_count:]
                 last_step_count = len(steps_list)
             
-            # Stream new steps
+            # Stream new steps with delay for natural transition
             for step in new_steps:
                 yield f"data: {json.dumps({'type': 'step', 'step': step})}\n\n"
+                await asyncio.sleep(0.3)  # 300ms delay between steps for natural transition
         
         # Wait for thread to finish
         agent_thread.join(timeout=30)
@@ -188,6 +198,7 @@ async def stream_chat_response(
                 'citations': result.get('citations', []),
                 'tool_calls': result.get('tool_calls', []),
                 'thinking_steps': result.get('thinking_steps', []),
+                'draft_data': result.get('draft_data'),  # Include draft data if generated
                 'error': result.get('error')
             })}\n\n"
         
@@ -226,22 +237,15 @@ async def ask_thread_question(
     )
 
 
-@router.post("/thread-chat/draft", response_model=DraftResponse)
-async def generate_draft_reply(
+async def stream_draft_response(
+    draft_request: DraftRequest,
     request: Request,
-    draft_request: DraftRequest = Body(...),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Generate a draft reply for an email thread.
-    Returns draft text only - does not send the email.
+    db: AsyncSession
+) -> AsyncGenerator[str, None]:
+    """Stream draft generation with thinking steps"""
+    import asyncio
+    import threading
     
-    Args:
-        thread_id: Gmail thread ID
-        instruction: Optional instruction (e.g., "be concise", "ask for clarification")
-        tone: Tone of reply (professional, friendly, formal, casual)
-        email: Email account to use (optional)
-    """
     try:
         # Get user ID
         user_id = await get_current_user_id(request, db)
@@ -256,7 +260,8 @@ async def generate_draft_reply(
         user_emails = result.scalars().all()
         
         if not user_emails:
-            raise HTTPException(status_code=404, detail="No email accounts found")
+            yield f"data: {json.dumps({'type': 'error', 'error': 'No email accounts found'})}\n\n"
+            return
         
         # Sort emails: specified email first, then primary, then others
         email_list = []
@@ -295,64 +300,163 @@ async def generate_draft_reply(
                 continue
         
         if not gmail_service:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Thread {draft_request.thread_id} not found in any of your email accounts"
-            )
+            yield f"data: {json.dumps({'type': 'error', 'error': f'Thread {draft_request.thread_id} not found in any of your email accounts'})}\n\n"
+            return
         
         # Initialize agent
         agent = ThreadChatAgent(gmail_service, final_email)
         
-        # Generate draft
-        result = agent.draft_reply(
-            thread_id=draft_request.thread_id,
-            instruction=draft_request.instruction,
-            tone=draft_request.tone or "professional"
-        )
+        # Shared list to collect steps (thread-safe with lock)
+        steps_list = []
+        steps_lock = threading.Lock()
+        agent_done = threading.Event()
+        agent_result = {'result': None, 'error': None}
         
-        if not result.get("success"):
-            return DraftResponse(
-                success=False,
-                error=result.get("error", "Failed to generate draft")
-            )
+        def step_callback(step: dict):
+            """Callback to collect thinking steps"""
+            with steps_lock:
+                steps_list.append(step)
+        
+        def run_agent():
+            """Run agent in thread"""
+            try:
+                result = agent.draft_reply(
+                    thread_id=draft_request.thread_id,
+                    instruction=draft_request.instruction,
+                    tone=draft_request.tone or "professional",
+                    step_callback=step_callback
+                )
+                agent_result['result'] = result
+            except Exception as e:
+                agent_result['error'] = str(e)
+            finally:
+                agent_done.set()
+        
+        # Start agent in thread
+        agent_thread = threading.Thread(target=run_agent, daemon=True)
+        agent_thread.start()
+        
+        # Stream steps as they're generated
+        last_step_count = 0
+        while not agent_done.is_set() or last_step_count < len(steps_list):
+            await asyncio.sleep(0.1)  # Check every 100ms
+            
+            # Get new steps
+            with steps_lock:
+                new_steps = steps_list[last_step_count:]
+                last_step_count = len(steps_list)
+            
+            # Stream new steps with delay for natural transition
+            for step in new_steps:
+                yield f"data: {json.dumps({'type': 'step', 'step': step})}\n\n"
+                await asyncio.sleep(0.3)  # 300ms delay between steps for natural transition
+        
+        # Wait for thread to finish
+        agent_thread.join(timeout=30)
+        
+        # Check for errors
+        if agent_result['error']:
+            yield f"data: {json.dumps({'type': 'error', 'error': agent_result['error']})}\n\n"
+            return
+        
+        # Process result
+        result = agent_result['result']
+        if not result or not result.get("success"):
+            yield f"data: {json.dumps({
+                'type': 'result',
+                'success': False,
+                'error': result.get('error', 'Failed to generate draft') if result else 'No result returned'
+            })}\n\n"
+            return
         
         # Save to Gmail if requested
         gmail_draft_id = None
         if draft_request.save_to_gmail:
+            # Add tool call step
+            tool_call_step = {
+                "type": "tool_call",
+                "tool": "save_gmail_draft",
+                "args": {"to": result.get("to", ""), "subject": result.get("subject", "")},
+                "status": "calling",
+                "timestamp": None
+            }
+            with steps_lock:
+                steps_list.append(tool_call_step)
+            yield f"data: {json.dumps({'type': 'step', 'step': tool_call_step})}\n\n"
+            
             draft_result = gmail_service.create_draft(
                 to=result.get("to", ""),
                 subject=result.get("subject", ""),
                 body=result.get("body", ""),
                 thread_id=draft_request.thread_id
             )
+            
             if draft_result.get("success"):
                 gmail_draft_id = draft_result.get("draft_id")
+                tool_result_step = {
+                    "type": "tool_result",
+                    "tool": "save_gmail_draft",
+                    "status": "success",
+                    "summary": f"Draft saved to Gmail (ID: {gmail_draft_id})",
+                    "timestamp": None
+                }
+                with steps_lock:
+                    steps_list.append(tool_result_step)
+                yield f"data: {json.dumps({'type': 'step', 'step': tool_result_step})}\n\n"
             else:
-                # Return error but still return the draft text
-                return DraftResponse(
-                    success=True,
-                    subject=result.get("subject"),
-                    body=result.get("body"),
-                    full_draft=result.get("full_draft"),
-                    gmail_draft_id=None,
-                    error=f"Generated draft but failed to save to Gmail: {draft_result.get('error')}"
-                )
+                tool_result_step = {
+                    "type": "tool_result",
+                    "tool": "save_gmail_draft",
+                    "status": "error",
+                    "error": draft_result.get("error", "Unknown error"),
+                    "timestamp": None
+                }
+                with steps_lock:
+                    steps_list.append(tool_result_step)
+                yield f"data: {json.dumps({'type': 'step', 'step': tool_result_step})}\n\n"
         
-        return DraftResponse(
-            success=True,
-            subject=result.get("subject"),
-            body=result.get("body"),
-            full_draft=result.get("full_draft"),
-            gmail_draft_id=gmail_draft_id,
-            error=None
-        )
+        # Stream final result
+        yield f"data: {json.dumps({
+            'type': 'result',
+            'success': True,
+            'subject': result.get('subject'),
+            'body': result.get('body'),
+            'full_draft': result.get('full_draft'),
+            'gmail_draft_id': gmail_draft_id,
+            'error': None
+        })}\n\n"
         
     except Exception as e:
         error_str = str(e)
-        print(f"Error generating draft: {e}")
+        print(f"Error in draft generation: {e}")
         import traceback
         print(traceback.format_exc())
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to generate draft: {error_str}"
-        )
+        yield f"data: {json.dumps({'type': 'error', 'error': error_str})}\n\n"
+
+
+@router.post("/thread-chat/draft")
+async def generate_draft_reply(
+    request: Request,
+    draft_request: DraftRequest = Body(...),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate a draft reply for an email thread with streaming thinking steps.
+    Returns Server-Sent Events (SSE) stream.
+    
+    Args:
+        thread_id: Gmail thread ID
+        instruction: Optional instruction (e.g., "be concise", "ask for clarification")
+        tone: Tone of reply (professional, friendly, formal, casual)
+        email: Email account to use (optional)
+        save_to_gmail: Whether to save draft to Gmail
+    """
+    return StreamingResponse(
+        stream_draft_response(draft_request, request, db),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )

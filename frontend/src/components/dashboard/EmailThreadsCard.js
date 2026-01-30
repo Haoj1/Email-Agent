@@ -3,6 +3,8 @@ import React from 'react';
 export default function EmailThreadsCard({
   loadingThreads,
   onRefreshEmails,
+  onLoadMore,
+  hasMore,
   syncing,
   onSyncInbox,
   emailThreads,
@@ -11,7 +13,15 @@ export default function EmailThreadsCard({
   return (
     <div className="card">
       <h2>Email Threads</h2>
-      <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+      <div
+        style={{
+          marginTop: '16px',
+          marginBottom: '16px',
+          display: 'flex',
+          gap: '12px',
+          flexWrap: 'wrap',
+        }}
+      >
         <button className="btn-primary" onClick={onRefreshEmails} disabled={loadingThreads}>
           {loadingThreads ? 'Loading...' : 'Refresh Emails'}
         </button>
@@ -83,6 +93,24 @@ export default function EmailThreadsCard({
                       </div>
                     ))}
                   </div>
+
+                  {hasMore && (
+                    <div style={{ marginTop: '20px', textAlign: 'center' }}>
+                      <button
+                        className="btn-primary"
+                        onClick={onLoadMore}
+                        disabled={loadingThreads}
+                        style={{
+                          backgroundColor: '#f5f5f5',
+                          color: '#2e7d32',
+                          border: '1px solid #2e7d32',
+                          padding: '8px 24px',
+                        }}
+                      >
+                        {loadingThreads ? 'Loading...' : 'Load More History'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -94,4 +122,3 @@ export default function EmailThreadsCard({
     </div>
   );
 }
-

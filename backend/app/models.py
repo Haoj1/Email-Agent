@@ -149,11 +149,13 @@ class TriageResult(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     task_id = Column(Integer, ForeignKey("triage_tasks.id", ondelete="SET NULL"), nullable=True, index=True)  # Link to task
+    email = Column(String, nullable=True, index=True)  # Source email for this triage result
     thread_id = Column(String, nullable=False, index=True)
     label = Column(String, nullable=False)  # NEEDS_REPLY, FYI, ARCHIVE, SPAM_LIKE
     priority = Column(Float, nullable=False)  # 0-1
     summary = Column(Text, nullable=True)
     key_points = Column(JSONB, nullable=True)
+    message_count = Column(Integer, nullable=True)  # Number of messages in thread when triaged (for smart updates)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     

@@ -109,6 +109,15 @@ function ThreadDetail() {
           <span>
             {thread.message_count} message{thread.message_count !== 1 ? 's' : ''}
           </span>
+          <a
+            href={`https://mail.google.com/mail/u/0/#all/${threadId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-gmail"
+            title="View in Gmail"
+          >
+            Go to Gmail
+          </a>
           <button
             className="btn-chat"
             onClick={() => setShowChat(!showChat)}
@@ -185,16 +194,14 @@ function ThreadDetail() {
         })}
       </div>
 
-      {showChat && (
-        <>
-          <ThreadChatPanel
-            threadId={threadId}
-            email={thread?.email_account || email}
-            onClose={() => setShowChat(false)}
-          />
-          <div className="thread-chat-overlay" onClick={() => setShowChat(false)} />
-        </>
-      )}
+      <div className={`thread-chat-wrapper ${showChat ? 'open' : ''}`}>
+        <ThreadChatPanel
+          threadId={threadId}
+          email={thread?.email_account || email}
+          onClose={() => setShowChat(false)}
+        />
+        <div className="thread-chat-overlay" onClick={() => setShowChat(false)} />
+      </div>
     </div>
   );
 }

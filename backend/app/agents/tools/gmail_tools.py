@@ -308,10 +308,150 @@ def create_gmail_tools(gmail_service: GmailService, email: Optional[str] = None)
         except Exception as e:
             return {"success": False, "error": str(e)}
     
+    @tool
+    def generate_draft_reply(
+        thread_id: str,
+        instruction: Optional[str] = None,
+        tone: str = "professional"
+    ) -> Dict[str, Any]:
+        """
+        Generate a draft email reply for a thread.
+        Use this when the user asks to generate a reply, draft, or write a response.
+        
+        Args:
+            thread_id: Gmail thread ID (required)
+            instruction: Optional instruction for the draft (e.g., "be concise", "ask for clarification")
+            tone: Tone of reply (professional, friendly, formal, casual). Default: professional
+        
+        Returns:
+            Dictionary with draft content including subject and body
+        """
+        try:
+            # Get thread first
+            thread_data = gmail_service.get_thread_full(thread_id)
+            normalized = gmail_service.normalize_thread(thread_data)
+            
+            if not normalized:
+                return {
+                    "success": False,
+                    "error": "Failed to load thread"
+                }
+            
+            # Extract recipient information
+            participants = normalized.get('participants', {})
+            to_email = participants.get('from', '')
+            if not to_email:
+                messages = normalized.get('messages', [])
+                if messages:
+                    from_header = messages[0].get('from', '')
+                    match = re.search(r'<(.+?)>', from_header)
+                    if match:
+                        to_email = match.group(1)
+                    else:
+                        to_email = from_header
+            
+            # Get latest message content
+            latest_message = normalized.get('messages', [{}])[-1] if normalized.get('messages') else {}
+            latest_body = latest_message.get('body', '') or latest_message.get('snippet', '')
+            
+            # Use LLM to generate draft (simplified version, can be enhanced)
+            from langchain_core.messages import SystemMessage, HumanMessage
+            from app.agents.llm_factory import get_chat_llm
+            
+            llm = get_chat_llm()
+            
+            messages = [
+                SystemMessage(content=f"""You are an email assistant that generates professional email drafts.
+
+IMPORTANT: You must ONLY output the draft email content in the exact format below. Do NOT include any explanations, thinking, or tool calls.
+
+Output format (strictly follow this):
+SUBJECT: [email subject line]
+BODY: [email body content]
+
+Rules:
+- Tone: {tone}
+- Be concise and professional
+- Address all questions/requests from the original email
+- Do NOT include any meta-commentary or explanations
+- Do NOT show your thinking process
+- Output ONLY the SUBJECT and BODY lines"""),
+                HumanMessage(content=f"""Generate a draft email reply.
+
+Original Email:
+From: {normalized.get('participants', {}).get('from', 'N/A')}
+Subject: {normalized.get('subject', 'N/A')}
+Content: {latest_body[:1000]}
+
+{"Additional instruction: " + instruction if instruction else ""}
+
+Generate the draft reply now. Output ONLY SUBJECT: and BODY: lines.""")
+            ]
+            
+            response = llm.invoke(messages)
+            draft_content = response.content if hasattr(response, 'content') else str(response)
+            
+            # Parse draft
+            subject = ""
+            body = ""
+            
+            if "SUBJECT:" in draft_content.upper():
+                subject_match = re.search(r'SUBJECT:\s*(.+?)(?=BODY:|$)', draft_content, re.IGNORECASE | re.DOTALL)
+                if subject_match:
+                    subject = subject_match.group(1).strip()
+            
+            if "BODY:" in draft_content.upper():
+                body_match = re.search(r'BODY:\s*(.+?)$', draft_content, re.IGNORECASE | re.DOTALL)
+                if body_match:
+                    body = body_match.group(1).strip()
+            
+            # Fallback parsing
+            if not body:
+                if "SUBJECT:" in draft_content.upper():
+                    parts = re.split(r'SUBJECT:', draft_content, flags=re.IGNORECASE, maxsplit=1)
+                    if len(parts) > 1:
+                        remaining = parts[1]
+                        if "BODY:" in remaining.upper():
+                            body = re.split(r'BODY:', remaining, flags=re.IGNORECASE, maxsplit=1)[1].strip()
+                        else:
+                            body = remaining.strip()
+                else:
+                    body = draft_content.strip()
+            
+            # Clean up
+            subject = subject.strip().strip('"').strip("'")
+            body = body.strip()
+            body = re.sub(r'^(SUBJECT:|BODY:)\s*', '', body, flags=re.IGNORECASE | re.MULTILINE)
+            
+            # If subject is empty, use Re: prefix
+            if not subject and normalized.get('subject'):
+                original_subject = normalized.get('subject', '')
+                if not original_subject.lower().startswith('re:'):
+                    subject = f"Re: {original_subject}"
+                else:
+                    subject = original_subject
+            
+            if not body:
+                body = "Draft content could not be extracted. Please try again."
+            
+            return {
+                "success": True,
+                "subject": subject,
+                "body": body,
+                "to": to_email,
+                "thread_id": thread_id
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
     return [
         get_thread,
         batch_get_threads,
         search_related_threads,
         extract_relevant_context,
         list_labels,
+        generate_draft_reply,
     ]

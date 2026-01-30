@@ -4,15 +4,24 @@
   top: 0;
   width: 400px;
   height: 100vh;
+  max-height: 100vh;
   background: #ffffff;
   border-left: 1px solid #e0e0e0;
   display: flex;
   flex-direction: column;
   z-index: 1000;
   box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
-  transition: transform 0.3s ease;
+  transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), 
+              height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   min-width: 300px;
   max-width: 800px;
+  overflow: hidden;
+  transform: translateX(100%);
+}
+
+.thread-chat-wrapper.open .thread-chat-panel {
+  transform: translateX(0);
 }
 
 .thread-chat-resizer {
@@ -32,7 +41,31 @@
 }
 
 .thread-chat-panel.minimized {
-  transform: translateY(calc(-100% + 48px));
+  height: 48px; /* Only show header height */
+  max-height: 48px;
+  overflow: hidden;
+  transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), 
+              height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.thread-chat-messages,
+.thread-chat-input-container {
+  transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.35s ease 0.05s,
+              padding 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 1;
+  max-height: 10000px; /* Large value to allow content to expand */
+}
+
+.thread-chat-panel.minimized .thread-chat-messages,
+.thread-chat-panel.minimized .thread-chat-input-container {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  padding: 0;
+  transition: opacity 0.3s ease,
+              max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+              padding 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .thread-chat-header {
@@ -43,6 +76,8 @@
   border-bottom: 1px solid #e0e0e0;
   background: #f8f9fa;
   cursor: move;
+  flex-shrink: 0; /* Prevent header from shrinking */
+  min-height: 48px; /* Ensure header has minimum height */
 }
 
 .thread-chat-title {
@@ -78,6 +113,16 @@
   background: #e0e0e0;
 }
 
+.chat-action-btn.clear-btn {
+  font-size: 16px;
+  color: #f44336;
+}
+
+.chat-action-btn.clear-btn:hover {
+  background: #ffebee;
+  color: #d32f2f;
+}
+
 .thread-chat-messages {
   flex: 1;
   overflow-y: auto;
@@ -85,6 +130,7 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-height: 0; /* Allow flex item to shrink */
 }
 
 .chat-empty-state {
@@ -265,12 +311,27 @@
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
-  transition: background-color 0.2s;
+  transition: all 0.2s;
+  min-width: 80px;
 }
 
 .draft-copy-btn:hover,
 .draft-save-btn:hover {
   background: #1565c0;
+}
+
+.draft-copy-btn:active {
+  transform: scale(0.98);
+}
+
+/* Copied state */
+.draft-copy-btn:has-text("Copied!") {
+  background: #4caf50;
+}
+
+/* Alternative: use a class for copied state */
+.draft-copy-btn.copied {
+  background: #4caf50;
 }
 
 .draft-view-btn {
@@ -368,6 +429,7 @@
 }
 
 .thinking-text {
+  white-space: pre-wrap; /* Preserve spaces */
   flex: 1;
   line-height: 1.4;
   display: flex;

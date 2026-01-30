@@ -37,6 +37,19 @@ class ThreadChatAgent:
         """System prompt for Thread Chat Agent"""
         return """You are a helpful email assistant that helps users understand and interact with their email threads.
 
+You have access to tools that allow you to:
+- Get thread details and messages
+- Search for related threads
+- Extract relevant context
+- Generate draft email replies
+
+When users ask you to:
+- "generate a reply" or "write a response" or "create a draft" → Use the generate_draft_reply tool
+- "help me reply" or "draft an email" → Use the generate_draft_reply tool
+- Ask questions about the thread → Use get_thread and other tools to answer
+
+Always use the appropriate tools to help users with their requests.
+
 ## Your Capabilities:
 1. **Answer questions** about email threads (summarize, extract action items, deadlines, key points)
 2. **Generate draft replies** based on thread context (provide text only, do not send)
@@ -50,10 +63,12 @@ class ThreadChatAgent:
 - **extract_relevant_context**: Extract relevant parts of a thread based on a question
 - **list_labels**: List Gmail labels
 - **get_current_time_tool**: Get current date/time for deadline calculations
+- **generate_draft_reply**: Generate a draft email reply (use when user asks to generate/write/create a reply, draft, or response)
 
 ## Guidelines:
 - Always use tools when you need to access email data
 - For long threads, use extract_relevant_context to focus on relevant parts
+- **When user asks to generate/write/create a reply or draft**: Use the generate_draft_reply tool
 - When generating draft replies, be concise, professional, and address all questions/requests
 - Cite specific messages when referencing content (e.g., "In the first message from John...")
 - If you're unsure about something, say so rather than guessing
@@ -110,6 +125,11 @@ Remember: You can only READ email data, you cannot send emails or modify anythin
         elif tool_name == "get_current_time_tool":
             if result.get("success"):
                 return f"Current time: {result.get('readable', 'N/A')}"
+            return f"Failed: {result.get('error', 'Unknown error')}"
+        
+        elif tool_name == "generate_draft_reply":
+            if result.get("success"):
+                return f"Draft generated: {result.get('subject', 'No subject')[:50]}..."
             return f"Failed: {result.get('error', 'Unknown error')}"
         
         return "Tool executed successfully"
@@ -226,6 +246,12 @@ Please use the available tools to get thread information and answer the question
                                     "question": question,
                                     **tool_args
                                 })
+                            elif tool_name == "generate_draft_reply":
+                                # Ensure thread_id is passed
+                                result = tool_func.invoke({
+                                    "thread_id": thread_id,
+                                    **tool_args
+                                })
                             else:
                                 result = tool_func.invoke(tool_args)
                             
@@ -256,11 +282,31 @@ Please use the available tools to get thread information and answer the question
                                         if "message_id" in seg:
                                             citations.append(f"Message {seg['message_id']}")
                             
+                            # Check if this is a draft generation result
+                            is_draft_result = (
+                                tool_name == "generate_draft_reply" and 
+                                isinstance(result, dict) and 
+                                result.get("success") and 
+                                "subject" in result and 
+                                "body" in result
+                            )
+                            
                             # Add tool result to messages
-                            messages.append(ToolMessage(
-                                content=str(result),
-                                tool_call_id=tool_call["id"]
-                            ))
+                            if is_draft_result:
+                                # Format draft result for LLM to understand
+                                draft_content = f"""Draft generated successfully:
+SUBJECT: {result.get('subject', '')}
+BODY: {result.get('body', '')}
+TO: {result.get('to', '')}"""
+                                messages.append(ToolMessage(
+                                    content=draft_content,
+                                    tool_call_id=tool_call["id"]
+                                ))
+                            else:
+                                messages.append(ToolMessage(
+                                    content=str(result),
+                                    tool_call_id=tool_call["id"]
+                                ))
                         except Exception as e:
                             # Record error
                             error_step = {
@@ -320,12 +366,27 @@ Please use the available tools to get thread information and answer the question
             # Extract final answer
             answer = response.content if hasattr(response, 'content') else str(response)
             
+            # Check if any tool call generated a draft
+            draft_data = None
+            for tool_call_info in tool_calls:
+                if tool_call_info.get("tool") == "generate_draft_reply":
+                    result = tool_call_info.get("result", {})
+                    if isinstance(result, dict) and result.get("success"):
+                        draft_data = {
+                            "subject": result.get("subject", ""),
+                            "body": result.get("body", ""),
+                            "to": result.get("to", ""),
+                            "thread_id": thread_id
+                        }
+                        break
+            
             return {
                 "success": True,
                 "answer": answer,
                 "citations": citations,
                 "tool_calls": tool_calls,
-                "thinking_steps": thinking_steps
+                "thinking_steps": thinking_steps,
+                "draft_data": draft_data  # Include draft if generated
             }
             
         except Exception as e:
@@ -342,7 +403,8 @@ Please use the available tools to get thread information and answer the question
         self,
         thread_id: str,
         instruction: Optional[str] = None,
-        tone: str = "professional"
+        tone: str = "professional",
+        step_callback: Optional[callable] = None
     ) -> Dict[str, Any]:
         """
         Generate a draft reply for a thread
@@ -365,6 +427,14 @@ Please use the available tools to get thread information and answer the question
                 "error": "Failed to load thread"
             }
         
+        # Add initial thinking step
+        if step_callback:
+            step_callback({
+                "type": "planning",
+                "content": "Analyzing thread context to generate draft reply...",
+                "timestamp": None
+            })
+        
         # Extract recipient information from thread
         participants = normalized.get('participants', {})
         to_email = participants.get('from', '')  # Reply to the sender
@@ -380,6 +450,13 @@ Please use the available tools to get thread information and answer the question
                     to_email = match.group(1)
                 else:
                     to_email = from_header
+        
+        if step_callback:
+            step_callback({
+                "type": "thinking",
+                "content": "Extracting thread information and preparing draft generation...",
+                "timestamp": None
+            })
         
         # Get latest message content for context
         latest_message = normalized.get('messages', [{}])[-1] if normalized.get('messages') else {}
@@ -415,8 +492,22 @@ Generate the draft reply now. Output ONLY SUBJECT: and BODY: lines.""")
         ]
         
         try:
+            if step_callback:
+                step_callback({
+                    "type": "thinking",
+                    "content": "Generating draft content with LLM...",
+                    "timestamp": None
+                })
+            
             response = self.llm.invoke(messages)
             draft_content = response.content if hasattr(response, 'content') else str(response)
+            
+            if step_callback:
+                step_callback({
+                    "type": "thinking",
+                    "content": "Parsing and cleaning draft content...",
+                    "timestamp": None
+                })
             
             # Clean up the response - remove any thinking or tool call traces
             import re

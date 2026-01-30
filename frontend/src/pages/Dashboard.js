@@ -18,11 +18,16 @@ function Dashboard() {
   const [calendarTest, setCalendarTest] = useState(null);
   const [emailThreads, setEmailThreads] = useState(null);
   const [loadingThreads, setLoadingThreads] = useState(false);
+  const [emailThreadsNextPageToken, setEmailThreadsNextPageToken] = useState(null);
   const [syncResult, setSyncResult] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [triageResults, setTriageResults] = useState(null);
+  const [triagePage, setTriagePage] = useState(0);
+  const TRIAGE_PAGE_SIZE = 20;
   const [runningTriage, setRunningTriage] = useState(false);
   const [loadingTriageResults, setLoadingTriageResults] = useState(false);
+  const [triageProgress, setTriageProgress] = useState({ current: 0, total: 0, progress: 0 });
+  const [triageStatus, setTriageStatus] = useState('');
   const [testing, setTesting] = useState(false);
   // Load selectedEmail from localStorage on mount
   const [selectedEmail, setSelectedEmail] = useState(() => {
@@ -169,9 +174,9 @@ function Dashboard() {
     }
   };
 
-  const loadEmailThreads = async (email = null, forceRefresh = false) => {
-    // Check cache first if not forcing refresh
-    if (!forceRefresh) {
+  const loadEmailThreads = async (email = null, forceRefresh = false, isLoadMore = false) => {
+    // Check cache first if not forcing refresh and not load more
+    if (!forceRefresh && !isLoadMore) {
       const cached = getCachedThreads(email);
       if (cached) {
         setEmailThreads(cached);
@@ -180,16 +185,44 @@ function Dashboard() {
     }
 
     setLoadingThreads(true);
-    if (forceRefresh) {
+    if (forceRefresh && !isLoadMore) {
       setEmailThreads(null);
+      setEmailThreadsNextPageToken(null);
     }
+    
     try {
-      const params = email ? { email } : {};
+      const params = {
+        max_results: 30,
+        days: 14 // Increased to 14 days for better history coverage
+      };
+      if (email) params.email = email;
+      if (isLoadMore && emailThreadsNextPageToken) {
+        params.page_token = emailThreadsNextPageToken;
+      }
+
       const response = await api.get('/gmail/threads', { params });
-      const threadsData = { success: true, data: response.data };
+      const newData = response.data;
+      
+      let mergedThreads = newData.threads || [];
+      if (isLoadMore && emailThreads?.data?.threads) {
+        mergedThreads = [...emailThreads.data.threads, ...mergedThreads];
+      }
+      
+      const threadsData = { 
+        success: true, 
+        data: {
+          ...newData,
+          threads: mergedThreads
+        } 
+      };
+      
       setEmailThreads(threadsData);
-      // Save to cache
-      setCachedThreads(email, threadsData);
+      setEmailThreadsNextPageToken(newData.next_page_token || null);
+      
+      // Save to cache (only if not load more)
+      if (!isLoadMore) {
+        setCachedThreads(email, threadsData);
+      }
     } catch (error) {
       const errorData = {
         success: false,
@@ -225,36 +258,98 @@ function Dashboard() {
 
     stopTriagePolling();
     setRunningTriage(true);
+    setTriageProgress({ current: 0, total: 0, progress: 0 });
+    setTriageStatus('Starting triage...');
     if (forceRefresh) {
       setTriageResults(null);
     }
-    try {
-      const response = await api.post('/triage/run', {
-        max_results: 10, // Small batch for testing
-        days: 7,
-        email: selectedEmail || null, // Still pass email for running triage on specific account
-      });
-      const triageData = sortTriageData({ success: true, data: response.data });
-      setTriageResults(triageData);
-      // Save to cache - use null as key since results are user-wide
-      setCachedTriageResults(null, triageData);
 
-      // Start polling for updated results
-      startTriagePolling();
+    try {
+      const baseURL = api.defaults.baseURL || 'http://localhost:5001/api';
+      const response = await fetch(`${baseURL}/triage/run`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          max_results: 100,
+          days: 7,
+          email: selectedEmail || null,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+
+              if (data.type === 'status') {
+                setTriageStatus(data.message || '');
+              } else if (data.type === 'progress') {
+                setTriageProgress({
+                  current: data.current || 0,
+                  total: data.total || 0,
+                  progress: data.progress || 0,
+                });
+              } else if (data.type === 'complete') {
+                const triageData = sortTriageData({
+                  success: data.success,
+                  data: {
+                    processed_count: data.processed_count,
+                    results: data.results || [],
+                    message: data.message,
+                  },
+                });
+                setTriageResults(triageData);
+                setCachedTriageResults(null, triageData);
+                setRunningTriage(false);
+                setTriageStatus('');
+                startTriagePolling();
+              } else if (data.type === 'error') {
+                setTriageResults({
+                  success: false,
+                  error: data.error || 'Unknown error occurred',
+                });
+                setRunningTriage(false);
+                setTriageStatus('');
+              }
+            } catch (e) {
+              console.error('Error parsing SSE data:', e);
+            }
+          }
+        }
+      }
     } catch (error) {
       setTriageResults({
         success: false,
-        error: error.response?.data?.detail || error.message,
+        error: error.message || 'Failed to run triage',
       });
       setRunningTriage(false);
-    } finally {
+      setTriageStatus('');
     }
   };
 
-  const loadTriageResults = async (label = null, forceRefresh = false, returnData = false) => {
-    // Check cache first if not forcing refresh and no label filter
+  const loadTriageResults = async (label = null, forceRefresh = false, returnData = false, isLoadMore = false) => {
+    // Check cache first if not forcing refresh and no label filter and not load more
     // Note: Triage results are per user, not per email, so we use null as cache key
-    if (!forceRefresh && !label) {
+    if (!forceRefresh && !label && !isLoadMore) {
       const cached = getCachedTriageResults(null);
       if (cached) {
         setTriageResults(cached);
@@ -263,19 +358,48 @@ function Dashboard() {
     }
 
     setLoadingTriageResults(true);
-    if (forceRefresh) {
+    if (forceRefresh && !isLoadMore) {
       setTriageResults(null);
+      setTriagePage(0);
     }
+    
+    const currentPage = isLoadMore ? triagePage + 1 : 0;
+    
     try {
-      const params = {};
+      const params = {
+        limit: TRIAGE_PAGE_SIZE,
+        skip: currentPage * TRIAGE_PAGE_SIZE
+      };
       // Don't pass email param - backend returns all results for the user
       if (label) params.label = label;
 
       const response = await api.get('/triage/results', { params });
-      const triageData = sortTriageData({ success: true, data: response.data });
+      const newData = response.data;
+      
+      let mergedResults = newData.results || [];
+      if (isLoadMore && triageResults?.data?.results) {
+        mergedResults = [...triageResults.data.results, ...mergedResults];
+      }
+      
+      const triageData = sortTriageData({ 
+        success: true, 
+        data: {
+          ...newData,
+          results: mergedResults,
+          total_count: newData.total_count,
+          count: mergedResults.length
+        }
+      });
+      
       setTriageResults(triageData);
-      // Save to cache (only if no label filter) - use null as key since results are user-wide
-      if (!label) {
+      if (isLoadMore) {
+        setTriagePage(currentPage);
+      } else {
+        setTriagePage(0);
+      }
+      
+      // Save to cache (only if no label filter and not load more)
+      if (!label && !isLoadMore) {
         setCachedTriageResults(null, triageData);
       }
       return returnData ? triageData : undefined;
@@ -355,11 +479,8 @@ function Dashboard() {
         loadEmailThreads(selectedEmail, false);
       }
 
-      // Check cache for triage results (user-wide, not email-specific)
-      const cachedTriage = getCachedTriageResults(null);
-      if (cachedTriage) {
-        setTriageResults(cachedTriage);
-      }
+      // Auto-load triage results (will check cache internally)
+      loadTriageResults(null, false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, selectedEmail]);
@@ -461,6 +582,8 @@ function Dashboard() {
         <EmailThreadsCard
           loadingThreads={loadingThreads}
           onRefreshEmails={() => loadEmailThreads(selectedEmail, true)}
+          onLoadMore={() => loadEmailThreads(selectedEmail, false, true)}
+          hasMore={!!emailThreadsNextPageToken}
           syncing={syncing}
           onSyncInbox={() => syncInbox(true)}
           emailThreads={emailThreads}
@@ -471,8 +594,11 @@ function Dashboard() {
           runningTriage={runningTriage}
           loadingTriageResults={loadingTriageResults}
           triageResults={triageResults}
+          triageProgress={triageProgress}
+          triageStatus={triageStatus}
           onRunTriage={runTriage}
-          onLoadTriageResults={() => loadTriageResults()}
+          onLoadTriageResults={() => loadTriageResults(null, true)}
+          onLoadMore={() => loadTriageResults(null, false, false, true)}
           onOpenThread={handleOpenThread}
         />
 

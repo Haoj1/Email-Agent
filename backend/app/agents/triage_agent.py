@@ -3,7 +3,7 @@ Email Triage Agent - Classify and prioritize email threads
 Uses LangGraph with DeepSeek LLM
 """
 import json
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Callable
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
@@ -178,19 +178,26 @@ Respond ONLY with valid JSON, no other text."""
         
         return prompt
     
-    def triage_batch(self, threads: List[Dict]) -> List[Dict]:
+    def triage_batch(self, threads: List[Dict], progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Dict]:
         """
         Triage multiple threads (sequential processing)
         
         Args:
             threads: List of normalized thread data
+            progress_callback: Optional callback function(current, total) called after each thread
         
         Returns:
             List of triage results
         """
         results = []
+        total = len(threads)
         for i, thread in enumerate(threads):
-            print(f"Processing thread {i+1}/{len(threads)}: {thread.get('thread_id', 'unknown')}")
+            print(f"Processing thread {i+1}/{total}: {thread.get('thread_id', 'unknown')}")
             result = self.triage_thread(thread)
             results.append(result)
+            
+            # Call progress callback if provided
+            if progress_callback:
+                progress_callback(i + 1, total)
+        
         return results

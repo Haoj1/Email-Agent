@@ -6,12 +6,20 @@ import asyncio
 from app.database import init_db, engine
 from sqlalchemy import text
 
-async def main():
+async def main(drop_tables=False):
     """Initialize database"""
-    print("🚀 Initializing database for MVP...")
+    print(f"🚀 {'Re-initializing' if drop_tables else 'Initializing'} database for MVP...")
     print()
     
     try:
+        if drop_tables:
+            print("⚠️  Dropping all existing tables...")
+            async with engine.begin() as conn:
+                from app.database import Base
+                await conn.run_sync(Base.metadata.drop_all)
+            print("✅ Tables dropped successfully.")
+            print()
+
         # Initialize database (create tables)
         await init_db()
         
@@ -29,9 +37,20 @@ async def main():
                 print()
                 print("✅ Database initialized successfully!")
                 print()
-                print("Created tables:")
+                print("Created tables and verified columns:")
                 for table in tables:
-                    print(f"  - {table[0]}")
+                    table_name = table[0]
+                    # Get column details
+                    col_result = await conn.execute(text(f"""
+                        SELECT column_name, data_type 
+                        FROM information_schema.columns 
+                        WHERE table_name = '{table_name}'
+                        ORDER BY ordinal_position;
+                    """))
+                    columns = col_result.fetchall()
+                    print(f"  - {table_name}:")
+                    for col in columns:
+                        print(f"    • {col[0]} ({col[1]})")
             
             # Count indexes
             result = await conn.execute(text("""
@@ -42,9 +61,9 @@ async def main():
             index_count = result.scalar()
             
             print()
-            print(f"✅ Created {len(tables)} tables with {index_count} indexes")
+            print(f"✅ Verified {len(tables)} tables with {index_count} indexes")
             print()
-            print("MVP database is ready!")
+            print("MVP database is ready with all current model fields!")
         
     except Exception as e:
         print(f"❌ Error initializing database: {e}")
@@ -58,5 +77,10 @@ async def main():
     return True
 
 if __name__ == "__main__":
-    success = asyncio.run(main())
+    import argparse
+    parser = argparse.ArgumentParser(description='Initialize database for MVP')
+    parser.add_argument('--drop', action='store_true', help='Drop all tables before recreating')
+    args = parser.parse_args()
+    
+    success = asyncio.run(main(drop_tables=args.drop))
     exit(0 if success else 1)

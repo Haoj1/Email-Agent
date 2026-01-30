@@ -31,12 +31,13 @@ async def get_email_threads(
     max_results: int = Query(30, ge=1, le=100, description="Maximum number of threads"),
     days: int = Query(7, ge=1, le=30, description="Number of days to look back"),
     email: Optional[str] = Query(None, description="Email to use (default: primary)"),
+    page_token: Optional[str] = Query(None, description="Page token for pagination"),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Get email threads from inbox
     
-    Returns list of email threads with basic information
+    Returns list of email threads with basic information and pagination token
     """
     try:
         # Get credentials
@@ -48,17 +49,22 @@ async def get_email_threads(
         query = f'after:{after_date}'
         
         # Get threads
-        result = service.users().threads().list(
-            userId='me',
-            maxResults=max_results,
-            q=query
-        ).execute()
+        list_params = {
+            "userId": 'me',
+            "maxResults": max_results,
+            "q": query
+        }
+        if page_token:
+            list_params["pageToken"] = page_token
+            
+        result = service.users().threads().list(**list_params).execute()
         
         threads = result.get('threads', [])
+        next_page_token = result.get('nextPageToken')
         thread_list = []
         
         # Get detailed information for each thread
-        for thread in threads[:max_results]:
+        for thread in threads:
             try:
                 thread_detail = service.users().threads().get(
                     userId='me',
@@ -98,7 +104,8 @@ async def get_email_threads(
             "success": True,
             "thread_count": len(thread_list),
             "total_estimated": result.get('resultSizeEstimate', 0),
-            "threads": thread_list
+            "threads": thread_list,
+            "next_page_token": next_page_token
         }
     except Exception as e:
         error_str = str(e)

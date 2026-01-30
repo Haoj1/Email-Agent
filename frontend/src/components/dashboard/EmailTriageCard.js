@@ -4,8 +4,11 @@ export default function EmailTriageCard({
   runningTriage,
   loadingTriageResults,
   triageResults,
+  triageProgress,
+  triageStatus,
   onRunTriage,
   onLoadTriageResults,
+  onLoadMore,
   onOpenThread,
 }) {
   return (
@@ -36,7 +39,7 @@ export default function EmailTriageCard({
               <span className="spinner" style={{ lineHeight: 0, alignSelf: 'center' }}></span>
             </span>
           ) : (
-            'Run Triage (Last 10 Threads)'
+            'Run Triage'
           )}
         </button>
         <button
@@ -84,11 +87,60 @@ export default function EmailTriageCard({
               margin: '0 auto 12px',
             }}
           ></div>
-          <p>
-            {runningTriage
-              ? 'Running triage on emails... (estimated ~1 minute)'
-              : 'Loading triage results...'}
-          </p>
+          {runningTriage && triageProgress.total > 0 ? (
+            <>
+              <p style={{ marginBottom: '12px' }}>
+                {triageStatus || 'Running triage on emails...'}
+              </p>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  marginBottom: '8px',
+                }}
+              >
+                <div
+                  style={{
+                    flex: 1,
+                    backgroundColor: '#e0e0e0',
+                    borderRadius: '10px',
+                    overflow: 'hidden',
+                    height: '24px',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${triageProgress.progress}%`,
+                      height: '100%',
+                      backgroundColor: '#7b1fa2',
+                      transition: 'width 0.3s ease',
+                    }}
+                  />
+                </div>
+                <span
+                  style={{
+                    color: '#666',
+                    fontSize: '0.9em',
+                    fontWeight: 'bold',
+                    minWidth: '45px',
+                    textAlign: 'right',
+                  }}
+                >
+                  {triageProgress.progress > 0 ? `${triageProgress.progress}%` : '0%'}
+                </span>
+              </div>
+              <p style={{ fontSize: '0.9em', color: '#888' }}>
+                Processing {triageProgress.current} of {triageProgress.total} threads
+              </p>
+            </>
+          ) : (
+            <p>
+              {runningTriage
+                ? triageStatus || 'Running triage on emails... (estimated ~1 minute)'
+                : 'Loading triage results...'}
+            </p>
+          )}
         </div>
       )}
 
@@ -138,22 +190,27 @@ export default function EmailTriageCard({
                         >
                           <div
                             style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'flex-start',
                               marginBottom: '12px',
+                              paddingBottom: '8px',
+                              borderBottom: '1px solid #eee',
                             }}
                           >
-                            <div>
+                            <div
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                marginBottom: '6px',
+                              }}
+                            >
                               <span
                                 style={{
                                   backgroundColor: labelColor,
                                   color: '#fff',
                                   padding: '4px 12px',
                                   borderRadius: '12px',
-                                  fontSize: '0.85em',
+                                  fontSize: '0.8em',
                                   fontWeight: 'bold',
-                                  marginRight: '12px',
                                 }}
                               >
                                 {result.label}
@@ -168,9 +225,18 @@ export default function EmailTriageCard({
                                 Priority: {(result.priority * 100).toFixed(0)}%
                               </span>
                             </div>
-                            <span style={{ fontSize: '0.8em', color: '#666' }}>
-                              Thread: {result.thread_id?.substring(0, 8)}...
-                            </span>
+                            {result.email && (
+                              <div
+                                style={{
+                                  fontSize: '0.8em',
+                                  color: '#5c6bc0',
+                                  textAlign: 'right',
+                                  wordBreak: 'break-all',
+                                }}
+                              >
+                                Account: {result.email}
+                              </div>
+                            )}
                           </div>
 
                           {result.summary && (
@@ -219,6 +285,24 @@ export default function EmailTriageCard({
                       );
                     })}
                   </div>
+
+                  {triageResults.data.total_count > triageResults.data.results.length && (
+                    <div style={{ marginTop: '20px', textAlign: 'center' }}>
+                      <button
+                        className="btn-primary"
+                        onClick={onLoadMore}
+                        disabled={loadingTriageResults}
+                        style={{
+                          backgroundColor: '#f5f5f5',
+                          color: '#7b1fa2',
+                          border: '1px solid #7b1fa2',
+                          padding: '8px 24px',
+                        }}
+                      >
+                        {loadingTriageResults ? 'Loading...' : `Load More (Showing ${triageResults.data.results.length} of ${triageResults.data.total_count})`}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
