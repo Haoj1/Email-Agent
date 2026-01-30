@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 export default function EmailThreadsCard({
   loadingThreads,
@@ -10,9 +11,30 @@ export default function EmailThreadsCard({
   emailThreads,
   onOpenThread,
 }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isStandalonePage = location.pathname === '/threads';
+
   return (
-    <div className="card">
-      <h2>Email Threads</h2>
+    <div className="card" style={isStandalonePage ? { maxWidth: '100%', width: '100%' } : {}}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2>Email Threads</h2>
+        {!isStandalonePage && (
+          <button 
+            onClick={() => navigate('/threads')}
+            style={{ 
+              background: 'none', 
+              border: 'none', 
+              color: '#1976d2', 
+              cursor: 'pointer',
+              fontSize: '0.9em',
+              textDecoration: 'underline'
+            }}
+          >
+            View Full Page →
+          </button>
+        )}
+      </div>
       <div
         style={{
           marginTop: '16px',

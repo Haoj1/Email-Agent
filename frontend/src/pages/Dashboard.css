@@ -37,6 +37,12 @@
   gap: 24px;
 }
 
+.dashboard-content.full-width {
+  display: block;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
 @media (max-width: 768px) {
   .dashboard-content {
     grid-template-columns: 1fr;

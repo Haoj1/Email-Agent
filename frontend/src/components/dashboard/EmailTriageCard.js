@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 export default function EmailTriageCard({
   runningTriage,
@@ -11,9 +12,30 @@ export default function EmailTriageCard({
   onLoadMore,
   onOpenThread,
 }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isStandalonePage = location.pathname === '/triage';
+
   return (
-    <div className="card">
-      <h2>Email Triage Agent</h2>
+    <div className="card" style={isStandalonePage ? { maxWidth: '100%', width: '100%' } : {}}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2>Email Triage Agent</h2>
+        {!isStandalonePage && (
+          <button 
+            onClick={() => navigate('/triage')}
+            style={{ 
+              background: 'none', 
+              border: 'none', 
+              color: '#7b1fa2', 
+              cursor: 'pointer',
+              fontSize: '0.9em',
+              textDecoration: 'underline'
+            }}
+          >
+            View Full Page →
+          </button>
+        )}
+      </div>
       <p style={{ fontSize: '0.9em', color: '#666', marginBottom: '16px' }}>
         Classify and prioritize your emails using AI. Run triage on recent threads to get
         categories, priority scores, and summaries.
