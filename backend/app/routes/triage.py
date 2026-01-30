@@ -149,7 +149,7 @@ async def stream_triage_progress(
         progress_steps = []
         lock = threading.Lock()
         
-        def progress_callback(current: int, total: int):
+        def progress_callback(current: int, total: int, result: dict):
             with lock:
                 progress_steps.append({
                     'current': current,
@@ -165,7 +165,12 @@ async def stream_triage_progress(
         def run_triage():
             try:
                 triage_agent = TriageAgent()
-                results = triage_agent.triage_batch(threads_to_triage, progress_callback=progress_callback)
+                # Use concurrent processing with 4 workers
+                results = triage_agent.triage_batch(
+                    threads_to_triage, 
+                    progress_callback=progress_callback,
+                    max_workers=4
+                )
                 triage_results.extend(results)
             except Exception as e:
                 error_occurred[0] = True
@@ -420,7 +425,8 @@ async def run_triage_sync(
         # Run Triage Agent only on threads that need triage
         print(f"Running triage on {len(threads_to_triage)} threads (skipped {skipped_count} with no new messages)...")
         triage_agent = TriageAgent()
-        triage_results = triage_agent.triage_batch(threads_to_triage)
+        # Use concurrent processing with 4 workers
+        triage_results = triage_agent.triage_batch(threads_to_triage, max_workers=4)
         
         # Save to database
         saved_results = []

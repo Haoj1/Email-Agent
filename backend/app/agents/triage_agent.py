@@ -4,6 +4,7 @@ Uses LangGraph with DeepSeek LLM
 """
 import json
 from typing import Dict, List, Optional, Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
@@ -178,26 +179,45 @@ Respond ONLY with valid JSON, no other text."""
         
         return prompt
     
-    def triage_batch(self, threads: List[Dict], progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Dict]:
+    def triage_batch(self, threads: List[Dict], progress_callback: Optional[Callable[[int, int, Dict], None]] = None, max_workers: int = 4) -> List[Dict]:
         """
-        Triage multiple threads (sequential processing)
+        Triage multiple threads using concurrent processing (Map-Reduce style)
         
         Args:
             threads: List of normalized thread data
-            progress_callback: Optional callback function(current, total) called after each thread
+            progress_callback: Optional callback function(current, total, result) called after each thread
+            max_workers: Maximum number of concurrent threads
         
         Returns:
             List of triage results
         """
         results = []
         total = len(threads)
-        for i, thread in enumerate(threads):
-            print(f"Processing thread {i+1}/{total}: {thread.get('thread_id', 'unknown')}")
-            result = self.triage_thread(thread)
-            results.append(result)
+        
+        if total == 0:
+            return []
+
+        print(f"Starting concurrent triage for {total} threads with {max_workers} workers...")
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Map phase: Submit all tasks to the thread pool
+            future_to_thread = {executor.submit(self.triage_thread, thread): thread for thread in threads}
             
-            # Call progress callback if provided
-            if progress_callback:
-                progress_callback(i + 1, total)
+            # Reduce phase: Collect results as they complete
+            completed_count = 0
+            for future in as_completed(future_to_thread):
+                completed_count += 1
+                try:
+                    result = future.result()
+                    results.append(result)
+                    
+                    # Call progress callback if provided
+                    if progress_callback:
+                        progress_callback(completed_count, total, result)
+                        
+                except Exception as e:
+                    thread_data = future_to_thread[future]
+                    print(f"Thread processing generated an exception for thread {thread_data.get('thread_id')}: {e}")
+                    # Error handling is mostly done inside triage_thread, but this is a safety net
         
         return results
