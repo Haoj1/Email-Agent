@@ -24,7 +24,7 @@ export default function EmailTriageCard({
   return (
     <div className="card" style={isStandalonePage ? { maxWidth: '100%', width: '100%' } : {}}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2>Email Triage Agent</h2>
+      <h2>Email Triage Agent</h2>
         {!isStandalonePage && (
           <button 
             onClick={() => navigate('/triage')}

@@ -518,7 +518,8 @@ async def get_triage_stats(
         user_id = await get_current_user_id(request, db)
         
         # Trigger background sync and embedding whenever stats are checked
-        background_tasks.add_task(sync_and_embed_emails, user_id, email, days)
+        # Use force=False to respect the 1-hour cooldown period
+        background_tasks.add_task(sync_and_embed_emails, user_id, email, days, False)
         
         # 1. Get credentials and Gmail service
         credentials = await get_user_credentials(request, email, db)
@@ -566,7 +567,7 @@ async def get_triage_stats(
         }
     except Exception as e:
         print(f"Error getting triage stats: {e}")
-        return {"pending_count": 0}
+        return {"success": False, "pending_count": 0, "error": str(e)}
 
 
 @router.get("/triage/results")

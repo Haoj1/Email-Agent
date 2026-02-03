@@ -20,7 +20,7 @@ export default function EmailThreadsCard({
   return (
     <div className="card" style={isStandalonePage ? { maxWidth: '100%', width: '100%' } : {}}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2>Email Threads</h2>
+      <h2>Email Threads</h2>
         {!isStandalonePage && (
           <button 
             onClick={() => navigate('/threads')}
@@ -47,8 +47,8 @@ export default function EmailThreadsCard({
           alignItems: 'center',
         }}
       >
-        <button 
-          className="btn-primary" 
+        <button
+          className="btn-primary"
           onClick={onRefreshEmails} 
           disabled={loadingThreads}
           style={{

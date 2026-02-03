@@ -6,6 +6,12 @@ import EmailTriageCard from '../components/dashboard/EmailTriageCard';
 import './Dashboard.css';
 
 function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
+  const { 
+    pendingTriageCount, 
+    checkingPending, 
+    checkPendingTriage, 
+    setPendingTriageCount 
+  } = useEmailCache();
   const [triageResults, setTriageResults] = useState(null);
   const [triagePage, setTriagePage] = useState(0);
   const TRIAGE_PAGE_SIZE = 20;
@@ -13,39 +19,44 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
   const [loadingTriageResults, setLoadingTriageResults] = useState(false);
   const [triageProgress, setTriageProgress] = useState({ current: 0, total: 0, progress: 0 });
   const [triageStatus, setTriageStatus] = useState('');
-  const [pendingTriageCount, setPendingTriageCount] = useState(0);
-  const [checkingPending, setCheckingPending] = useState(false);
   const [triageDaysFilter, setTriageDaysFilter] = useState(null);
   
   const navigate = useNavigate();
   const triagePollingRef = useRef(null);
+  const pendingTriageCheckIntervalRef = useRef(null);
   const { getCachedTriageResults, setCachedTriageResults } = useEmailCache();
 
   useEffect(() => {
-    return () => stopTriagePolling();
+    return () => {
+      stopTriagePolling();
+      if (pendingTriageCheckIntervalRef.current) {
+        clearInterval(pendingTriageCheckIntervalRef.current);
+        pendingTriageCheckIntervalRef.current = null;
+      }
+    };
   }, []);
 
-  const checkPendingTriage = async (email) => {
-    setCheckingPending(true);
-    try {
-      const response = await api.get('/triage/stats', {
-        params: { email, days: 7 }
-      });
-      if (response.data.success) {
-        setPendingTriageCount(response.data.pending_count);
-      }
-    } catch (error) {
-      console.error('Failed to check pending triage:', error);
-    } finally {
-      setCheckingPending(false);
-    }
-  };
 
   useEffect(() => {
     if (user && user.authenticated) {
       loadTriageResults(null, false);
+      // Check immediately on mount/email change (respects global cooldown)
       checkPendingTriage(selectedEmail);
+      
+      // Then check every 5 minutes (300000 ms) - global cooldown will handle skipping if needed
+      const CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
+      pendingTriageCheckIntervalRef.current = setInterval(() => {
+        checkPendingTriage(selectedEmail);
+      }, CHECK_INTERVAL);
     }
+    
+    // Cleanup interval on unmount or when user/email changes
+    return () => {
+      if (pendingTriageCheckIntervalRef.current) {
+        clearInterval(pendingTriageCheckIntervalRef.current);
+        pendingTriageCheckIntervalRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, selectedEmail]);
 
@@ -122,6 +133,8 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
               setRunningTriage(false);
               setTriageStatus('');
               setPendingTriageCount(0); // Clear pending count after successful run
+              // Force check after triage to update count
+              checkPendingTriage(selectedEmail, true);
               // Auto-refresh results to ensure everything is in sync
               loadTriageResults(null, true);
             } else if (data.type === 'error') {
@@ -207,7 +220,7 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
           daysFilter={triageDaysFilter}
           onDaysFilterChange={handleDaysFilterChange}
           onRunTriage={runTriage}
-          onRefreshStats={() => checkPendingTriage(selectedEmail)}
+          onRefreshStats={() => checkPendingTriage(selectedEmail, true)}
           onLoadTriageResults={() => loadTriageResults(null, true)}
           onLoadMore={() => loadTriageResults(null, false, false, true)}
           onOpenThread={handleOpenThread}

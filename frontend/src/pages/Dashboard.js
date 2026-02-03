@@ -11,6 +11,12 @@ import NextStepsCard from '../components/dashboard/NextStepsCard';
 import './Dashboard.css';
 
 function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
+  const { 
+    pendingTriageCount, 
+    checkingPending, 
+    checkPendingTriage, 
+    setPendingTriageCount 
+  } = useEmailCache();
   const [gmailTest, setGmailTest] = useState(null);
   const [calendarTest, setCalendarTest] = useState(null);
   const [emailThreads, setEmailThreads] = useState(null);
@@ -26,8 +32,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   const [triageProgress, setTriageProgress] = useState({ current: 0, total: 0, progress: 0 });
   const [triageStatus, setTriageStatus] = useState('');
   const [testing, setTesting] = useState(false);
-  const [pendingTriageCount, setPendingTriageCount] = useState(0);
-  const [checkingPending, setCheckingPending] = useState(false);
+  const pendingTriageCheckIntervalRef = useRef(null);
   const [triageDaysFilter, setTriageDaysFilter] = useState(null);
   
   const [addingEmail, setAddingEmail] = useState(false);
@@ -227,7 +232,11 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
                 setCachedTriageResults(null, triageData);
                 setRunningTriage(false);
                 setTriageStatus('');
-                setPendingTriageCount(0); // Clear pending count after successful run
+                if (setPendingTriageCount) {
+                  setPendingTriageCount(0); // Clear pending count after successful run
+                // Force check after triage to update count
+                checkPendingTriage(selectedEmail, true);
+                }
                 // Auto-refresh results to ensure everything is in sync
                 loadTriageResults(null, true);
                 startTriagePolling();
@@ -330,28 +339,28 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     } finally { setSyncing(false); }
   };
 
-  const checkPendingTriage = async (email) => {
-    setCheckingPending(true);
-    try {
-      const response = await api.get('/triage/stats', {
-        params: { email, days: 7 }
-      });
-      if (response.data.success) {
-        setPendingTriageCount(response.data.pending_count);
-      }
-    } catch (error) {
-      console.error('Failed to check pending triage:', error);
-    } finally {
-      setCheckingPending(false);
-    }
-  };
 
   useEffect(() => {
     if (user && user.authenticated) {
       loadEmailThreads(selectedEmail, false);
       loadTriageResults(null, false);
+      // Check immediately on mount/email change (respects global cooldown)
       checkPendingTriage(selectedEmail);
+      
+      // Then check every 5 minutes (300000 ms) - global cooldown will handle skipping if needed
+      const CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
+      pendingTriageCheckIntervalRef.current = setInterval(() => {
+        checkPendingTriage(selectedEmail);
+      }, CHECK_INTERVAL);
     }
+    
+    // Cleanup interval on unmount or when user/email changes
+    return () => {
+      if (pendingTriageCheckIntervalRef.current) {
+        clearInterval(pendingTriageCheckIntervalRef.current);
+        pendingTriageCheckIntervalRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, selectedEmail]);
 
@@ -433,7 +442,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
           daysFilter={triageDaysFilter}
           onDaysFilterChange={handleDaysFilterChange}
           onRunTriage={runTriage}
-          onRefreshStats={() => checkPendingTriage(selectedEmail)}
+          onRefreshStats={() => checkPendingTriage(selectedEmail, true)}
           onLoadTriageResults={() => loadTriageResults(null, true)}
           onLoadMore={() => loadTriageResults(null, false, false, true)}
           onOpenThread={handleOpenThread}

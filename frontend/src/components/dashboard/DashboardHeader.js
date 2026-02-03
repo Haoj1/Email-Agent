@@ -30,9 +30,9 @@ export default function DashboardHeader({
         <h1>Email Agent</h1>
         <div className="user-info" style={{ margin: 0 }}>
           <div style={{ textAlign: 'right' }}>
-            <span>
-              Logged in as: <strong>{user?.email || user?.primary_email}</strong>
-            </span>
+          <span>
+            Logged in as: <strong>{user?.email || user?.primary_email}</strong>
+          </span>
             <div style={{ marginTop: '4px' }}>
               <button className="btn-secondary" onClick={onLogout} style={{ padding: '2px 8px', fontSize: '0.8em' }}>
                 Logout
@@ -56,30 +56,30 @@ export default function DashboardHeader({
       </div>
       
       <div className="user-info" style={{ padding: 0, background: 'none', border: 'none', boxShadow: 'none' }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            flexWrap: 'wrap',
-          }}
-        >
-          {user?.emails && user.emails.length > 1 && (
-            <div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              flexWrap: 'wrap',
+            }}
+          >
+            {user?.emails && user.emails.length > 1 && (
+              <div>
               <label style={{ fontSize: '0.9em', color: '#666' }}>Switch Email: </label>
-              <select
-                value={selectedEmail || user.primary_email || user.emails[0]?.email}
-                onChange={(e) => onSelectEmail(e.target.value)}
+                <select
+                  value={selectedEmail || user.primary_email || user.emails[0]?.email}
+                  onChange={(e) => onSelectEmail(e.target.value)}
                 style={{ marginLeft: '8px', padding: '4px 8px', borderRadius: '4px', border: '1px solid #ddd' }}
-              >
-                {user.emails.map((e) => (
-                  <option key={e.id} value={e.email}>
-                    {e.email} {e.is_primary && '(Primary)'}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+                >
+                  {user.emails.map((e) => (
+                    <option key={e.id} value={e.email}>
+                      {e.email} {e.is_primary && '(Primary)'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           {onAddEmail && (
             <button
               className="btn-primary"
@@ -90,10 +90,10 @@ export default function DashboardHeader({
               {addingEmail ? 'Connecting...' : '+ Add Email'}
             </button>
           )}
-          {addEmailError && (
-            <span style={{ color: '#d32f2f', fontSize: '0.9em' }}>{addEmailError}</span>
-          )}
-        </div>
+            {addEmailError && (
+              <span style={{ color: '#d32f2f', fontSize: '0.9em' }}>{addEmailError}</span>
+            )}
+          </div>
       </div>
     </div>
   );

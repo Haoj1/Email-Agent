@@ -58,7 +58,7 @@ async def main(drop_tables=False):
                     else:
                         print(f"  ✨ Index {idx_name} already exists.")
             print()
-
+        
         # Verify tables were created
         async with engine.begin() as conn:
             result = await conn.execute(text("""

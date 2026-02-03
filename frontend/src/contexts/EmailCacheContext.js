@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
+import { api } from '../services/api';
 
 const EmailCacheContext = createContext();
 
@@ -16,6 +17,14 @@ export const EmailCacheProvider = ({ children }) => {
   
   // Cache expiration time: 5 minutes
   const CACHE_EXPIRY = 5 * 60 * 1000;
+  
+  // Global pending triage state
+  const [pendingTriageCount, setPendingTriageCount] = useState(0);
+  const [checkingPending, setCheckingPending] = useState(false);
+  
+  // Global cooldown mechanism - tracks last check time per email
+  const lastCheckTimeRef = useRef({}); // { email: timestamp }
+  const CHECK_COOLDOWN = 5 * 60 * 1000; // 5 minutes in milliseconds
 
   const getCacheKey = (email) => email || 'default';
 
@@ -120,7 +129,48 @@ export const EmailCacheProvider = ({ children }) => {
     });
   }, []);
 
+  // Global checkPendingTriage function with cooldown
+  const checkPendingTriage = useCallback(async (email, force = false) => {
+    const emailKey = email || 'primary';
+    const now = Date.now();
+    const lastCheck = lastCheckTimeRef.current[emailKey];
+
+    // Check cooldown (unless forced)
+    if (!force && lastCheck && (now - lastCheck) < CHECK_COOLDOWN) {
+      const remainingMinutes = Math.ceil((CHECK_COOLDOWN - (now - lastCheck)) / 60000);
+      console.log(`Skipping pending triage check for ${emailKey} - cooldown active (${remainingMinutes} min remaining)`);
+      return;
+    }
+
+    setCheckingPending(true);
+    try {
+      const response = await api.get('/triage/stats', {
+        params: { email, days: 7 }
+      });
+      if (response.data.success) {
+        setPendingTriageCount(response.data.pending_count);
+        // Update last check time
+        lastCheckTimeRef.current[emailKey] = now;
+      }
+    } catch (error) {
+      console.error('Failed to check pending triage:', error);
+    } finally {
+      setCheckingPending(false);
+    }
+  }, []);
+
+  // Reset pending triage count (e.g., after running triage)
+  const resetPendingTriageCount = useCallback(() => {
+    setPendingTriageCount(0);
+  }, []);
+
+  // Clear cooldown cache (e.g., on logout)
+  const clearCooldownCache = useCallback(() => {
+    lastCheckTimeRef.current = {};
+  }, []);
+
   const value = {
+    // Cache functions
     getCachedThreads,
     setCachedThreads,
     getCachedSyncResult,
@@ -129,7 +179,14 @@ export const EmailCacheProvider = ({ children }) => {
     setCachedTriageResults,
     clearCache,
     clearExpiredCache,
-    isCacheValid
+    isCacheValid,
+    // Pending triage state
+    pendingTriageCount,
+    setPendingTriageCount,
+    checkingPending,
+    checkPendingTriage,
+    resetPendingTriageCount,
+    clearCooldownCache
   };
 
   return (

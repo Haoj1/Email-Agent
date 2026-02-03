@@ -278,8 +278,9 @@ async def get_current_user(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         
-        # Trigger background sync and embedding for the user
-        background_tasks.add_task(sync_and_embed_emails, user_id)
+        # Trigger background sync and embedding for the user (only if not recently done)
+        # This is a lightweight check - the actual deduplication happens in the task itself
+        background_tasks.add_task(sync_and_embed_emails, user_id, None, 7, False)
         
         # Get all emails for user
         result = await db.execute(
@@ -331,8 +332,22 @@ async def get_current_user_id(
     Dependency function to get current authenticated user ID
     Used by other routes that need user_id (e.g., triage.py)
     """
-    user = await get_current_user(request, db)
-    return user["user_id"]
+    session_id = request.cookies.get("session_id")
+    if not session_id or session_id not in user_sessions:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    user_data = user_sessions[session_id]
+    user_id = user_data.get("user_id")
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    # Verify user exists in database
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return user_id
 
 
 async def get_user_credentials(
