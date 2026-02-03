@@ -26,6 +26,9 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   const [triageProgress, setTriageProgress] = useState({ current: 0, total: 0, progress: 0 });
   const [triageStatus, setTriageStatus] = useState('');
   const [testing, setTesting] = useState(false);
+  const [pendingTriageCount, setPendingTriageCount] = useState(0);
+  const [checkingPending, setCheckingPending] = useState(false);
+  const [triageDaysFilter, setTriageDaysFilter] = useState(null);
   
   const [addingEmail, setAddingEmail] = useState(false);
   const [addEmailError, setAddEmailError] = useState(null);
@@ -99,10 +102,10 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     }
   };
 
-  const loadEmailThreads = async (email = null, forceRefresh = false, isLoadMore = false) => {
+  const loadEmailThreads = async (email = null, forceRefresh = false, isLoadMore = false, days = 14) => {
     if (!forceRefresh && !isLoadMore) {
       const cached = getCachedThreads(email);
-      if (cached) {
+      if (cached && cached.days === days) {
         setEmailThreads(cached);
         return;
       }
@@ -115,7 +118,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     }
     
     try {
-      const params = { max_results: 30, days: 14 };
+      const params = { max_results: 30, days: days || 14 };
       if (email) params.email = email;
       if (isLoadMore && emailThreadsNextPageToken) {
         params.page_token = emailThreadsNextPageToken;
@@ -131,6 +134,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
       
       const threadsData = { 
         success: true, 
+        days: days,
         data: { ...newData, threads: mergedThreads } 
       };
       
@@ -223,6 +227,9 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
                 setCachedTriageResults(null, triageData);
                 setRunningTriage(false);
                 setTriageStatus('');
+                setPendingTriageCount(0); // Clear pending count after successful run
+                // Auto-refresh results to ensure everything is in sync
+                loadTriageResults(null, true);
                 startTriagePolling();
               } else if (data.type === 'error') {
                 setTriageResults({ success: false, error: data.error || 'Unknown error' });
@@ -240,8 +247,8 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     }
   };
 
-  const loadTriageResults = async (label = null, forceRefresh = false, returnData = false, isLoadMore = false) => {
-    if (!forceRefresh && !label && !isLoadMore) {
+  const loadTriageResults = async (label = null, forceRefresh = false, returnData = false, isLoadMore = false, days = triageDaysFilter) => {
+    if (!forceRefresh && !label && !isLoadMore && !days) {
       const cached = getCachedTriageResults(null);
       if (cached) {
         setTriageResults(cached);
@@ -260,6 +267,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     try {
       const params = { limit: TRIAGE_PAGE_SIZE, skip: currentPage * TRIAGE_PAGE_SIZE };
       if (label) params.label = label;
+      if (days) params.days = days;
 
       const response = await api.get('/triage/results', { params });
       const newData = response.data;
@@ -322,10 +330,27 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     } finally { setSyncing(false); }
   };
 
+  const checkPendingTriage = async (email) => {
+    setCheckingPending(true);
+    try {
+      const response = await api.get('/triage/stats', {
+        params: { email, days: 7 }
+      });
+      if (response.data.success) {
+        setPendingTriageCount(response.data.pending_count);
+      }
+    } catch (error) {
+      console.error('Failed to check pending triage:', error);
+    } finally {
+      setCheckingPending(false);
+    }
+  };
+
   useEffect(() => {
     if (user && user.authenticated) {
       loadEmailThreads(selectedEmail, false);
       loadTriageResults(null, false);
+      checkPendingTriage(selectedEmail);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, selectedEmail]);
@@ -355,6 +380,15 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     }
   };
 
+  const handleDaysFilterChange = (days) => {
+    setTriageDaysFilter(days);
+    loadTriageResults(null, true, false, false, days);
+  };
+
+  const handleThreadsDaysFilterChange = (days) => {
+    loadEmailThreads(selectedEmail, true, false, days);
+  };
+
   return (
     <div className="dashboard-container">
       <div className="dashboard-content">
@@ -378,12 +412,14 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
         <EmailThreadsCard
           loadingThreads={loadingThreads}
           onRefreshEmails={() => loadEmailThreads(selectedEmail, true)}
-          onLoadMore={() => loadEmailThreads(selectedEmail, false, true)}
+          onLoadMore={() => loadEmailThreads(selectedEmail, false, true, emailThreads?.days)}
           hasMore={!!emailThreadsNextPageToken}
           syncing={syncing}
           onSyncInbox={() => syncInbox(true)}
           emailThreads={emailThreads}
           onOpenThread={handleOpenThread}
+          daysFilter={emailThreads?.days || 14}
+          onDaysFilterChange={handleThreadsDaysFilterChange}
         />
 
         <EmailTriageCard
@@ -392,7 +428,12 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
           triageResults={triageResults}
           triageProgress={triageProgress}
           triageStatus={triageStatus}
+          pendingCount={pendingTriageCount}
+          checkingPending={checkingPending}
+          daysFilter={triageDaysFilter}
+          onDaysFilterChange={handleDaysFilterChange}
           onRunTriage={runTriage}
+          onRefreshStats={() => checkPendingTriage(selectedEmail)}
           onLoadTriageResults={() => loadTriageResults(null, true)}
           onLoadMore={() => loadTriageResults(null, false, false, true)}
           onOpenThread={handleOpenThread}

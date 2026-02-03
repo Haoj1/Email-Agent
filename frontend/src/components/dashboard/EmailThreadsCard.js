@@ -10,6 +10,8 @@ export default function EmailThreadsCard({
   onSyncInbox,
   emailThreads,
   onOpenThread,
+  daysFilter,
+  onDaysFilterChange,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -42,19 +44,53 @@ export default function EmailThreadsCard({
           display: 'flex',
           gap: '12px',
           flexWrap: 'wrap',
+          alignItems: 'center',
         }}
       >
-        <button className="btn-primary" onClick={onRefreshEmails} disabled={loadingThreads}>
-          {loadingThreads ? 'Loading...' : 'Refresh Emails'}
-        </button>
-        <button
-          className="btn-primary"
-          onClick={onSyncInbox}
-          disabled={syncing}
-          style={{ backgroundColor: '#2e7d32' }}
+        <button 
+          className="btn-primary" 
+          onClick={onRefreshEmails} 
+          disabled={loadingThreads}
+          style={{
+            height: '38px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minWidth: '130px'
+          }}
         >
-          {syncing ? 'Syncing...' : 'Sync Inbox (Normalize)'}
+          {loadingThreads ? (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              Loading...
+              <span className="spinner" style={{ lineHeight: 0, alignSelf: 'center' }}></span>
+            </span>
+          ) : (
+            'Refresh Emails'
+          )}
         </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+          <label style={{ fontSize: '0.85em', color: '#666' }}>Time Range:</label>
+          <select
+            value={daysFilter || '14'}
+            onChange={(e) => onDaysFilterChange(parseInt(e.target.value))}
+            style={{
+              padding: '4px 8px',
+              borderRadius: '4px',
+              border: '1px solid #ddd',
+              fontSize: '0.85em',
+              backgroundColor: '#fff',
+              color: '#333',
+              outline: 'none'
+            }}
+          >
+            <option value="1">Today</option>
+            <option value="3">Last 3 Days</option>
+            <option value="7">Last Week</option>
+            <option value="14">Last 2 Weeks</option>
+            <option value="30">Last Month</option>
+          </select>
+        </div>
       </div>
 
       {emailThreads && (

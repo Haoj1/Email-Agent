@@ -5,6 +5,7 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Uniq
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
+from pgvector.sqlalchemy import Vector
 from app.database import Base
 
 
@@ -113,6 +114,7 @@ class AssistChatSession(Base):
     # MVP: Only essential index - get recent sessions for user
     __table_args__ = (
         Index('idx_assist_user_updated', 'user_id', 'updated_at'),  # List recent sessions
+        Index('idx_assist_user_created_at', 'user_id', 'created_at'),
     )
 
 
@@ -139,6 +141,7 @@ class TriageTask(Base):
     # MVP: Essential indexes for task polling
     __table_args__ = (
         Index('idx_triage_task_user_status', 'user_id', 'status', 'created_at'),  # List user's tasks by status
+        Index('idx_triage_task_user_created_at', 'user_id', 'created_at'),
     )
 
 
@@ -167,6 +170,8 @@ class TriageResult(Base):
     __table_args__ = (
         UniqueConstraint('user_id', 'thread_id', name='unique_user_thread_triage'),
         Index('idx_triage_user_label_priority', 'user_id', 'label', 'priority'),  # Today View filtering
+        Index('idx_triage_user_created_at', 'user_id', 'created_at'),  # Added for time-based filtering
+        Index('idx_triage_user_updated_at', 'user_id', 'updated_at'),
     )
 
 
@@ -191,6 +196,7 @@ class Draft(Base):
     # MVP: Only essential index - list user's drafts
     __table_args__ = (
         Index('idx_draft_user_created', 'user_id', 'created_at'),  # List drafts
+        Index('idx_draft_user_updated_at', 'user_id', 'updated_at'),
     )
 
 
@@ -220,4 +226,28 @@ class CalendarProposal(Base):
     # MVP: Essential index - list pending proposals by date
     __table_args__ = (
         Index('idx_calendar_user_status_start', 'user_id', 'status', 'start_iso'),  # List proposals
+        Index('idx_calendar_user_created_at', 'user_id', 'created_at'),
+        Index('idx_calendar_user_updated_at', 'user_id', 'updated_at'),
+    )
+
+
+class EmailEmbedding(Base):
+    """Stores email chunks and their vectors for RAG retrieval"""
+    __tablename__ = "email_embeddings"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    thread_id = Column(String, nullable=False, index=True)
+    message_id = Column(String, nullable=True)
+    
+    content = Column(Text, nullable=False)  # The actual text chunk
+    embedding = Column(Vector(384), nullable=False)  # 384 dimensions for all-MiniLM-L6-v2
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationships
+    user = relationship("User")
+    
+    __table_args__ = (
+        Index('idx_email_embedding_user_thread', 'user_id', 'thread_id'),
     )

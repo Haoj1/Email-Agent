@@ -13,6 +13,9 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
   const [loadingTriageResults, setLoadingTriageResults] = useState(false);
   const [triageProgress, setTriageProgress] = useState({ current: 0, total: 0, progress: 0 });
   const [triageStatus, setTriageStatus] = useState('');
+  const [pendingTriageCount, setPendingTriageCount] = useState(0);
+  const [checkingPending, setCheckingPending] = useState(false);
+  const [triageDaysFilter, setTriageDaysFilter] = useState(null);
   
   const navigate = useNavigate();
   const triagePollingRef = useRef(null);
@@ -22,9 +25,26 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
     return () => stopTriagePolling();
   }, []);
 
+  const checkPendingTriage = async (email) => {
+    setCheckingPending(true);
+    try {
+      const response = await api.get('/triage/stats', {
+        params: { email, days: 7 }
+      });
+      if (response.data.success) {
+        setPendingTriageCount(response.data.pending_count);
+      }
+    } catch (error) {
+      console.error('Failed to check pending triage:', error);
+    } finally {
+      setCheckingPending(false);
+    }
+  };
+
   useEffect(() => {
     if (user && user.authenticated) {
       loadTriageResults(null, false);
+      checkPendingTriage(selectedEmail);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, selectedEmail]);
@@ -101,6 +121,9 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
               setCachedTriageResults(null, triageData);
               setRunningTriage(false);
               setTriageStatus('');
+              setPendingTriageCount(0); // Clear pending count after successful run
+              // Auto-refresh results to ensure everything is in sync
+              loadTriageResults(null, true);
             } else if (data.type === 'error') {
               setTriageResults({ success: false, error: data.error || 'Unknown error' });
               setRunningTriage(false);
@@ -115,8 +138,8 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
     }
   };
 
-  const loadTriageResults = async (label = null, forceRefresh = false, returnData = false, isLoadMore = false) => {
-    if (!forceRefresh && !label && !isLoadMore) {
+  const loadTriageResults = async (label = null, forceRefresh = false, returnData = false, isLoadMore = false, days = triageDaysFilter) => {
+    if (!forceRefresh && !label && !isLoadMore && !days) {
       const cached = getCachedTriageResults(null);
       if (cached) {
         setTriageResults(cached);
@@ -135,6 +158,7 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
     try {
       const params = { limit: TRIAGE_PAGE_SIZE, skip: currentPage * TRIAGE_PAGE_SIZE };
       if (label) params.label = label;
+      if (days) params.days = days;
 
       const response = await api.get('/triage/results', { params });
       const newData = response.data;
@@ -164,6 +188,11 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
     navigate(`/thread/${threadId}?${params.toString()}`);
   };
 
+  const handleDaysFilterChange = (days) => {
+    setTriageDaysFilter(days);
+    loadTriageResults(null, true, false, false, days);
+  };
+
   return (
     <div className="dashboard-container">
       <div className="dashboard-content full-width">
@@ -173,7 +202,12 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
           triageResults={triageResults}
           triageProgress={triageProgress}
           triageStatus={triageStatus}
+          pendingCount={pendingTriageCount}
+          checkingPending={checkingPending}
+          daysFilter={triageDaysFilter}
+          onDaysFilterChange={handleDaysFilterChange}
           onRunTriage={runTriage}
+          onRefreshStats={() => checkPendingTriage(selectedEmail)}
           onLoadTriageResults={() => loadTriageResults(null, true)}
           onLoadMore={() => loadTriageResults(null, false, false, true)}
           onOpenThread={handleOpenThread}

@@ -7,7 +7,12 @@ export default function EmailTriageCard({
   triageResults,
   triageProgress,
   triageStatus,
+  pendingCount,
+  checkingPending,
+  daysFilter,
+  onDaysFilterChange,
   onRunTriage,
+  onRefreshStats,
   onLoadTriageResults,
   onLoadMore,
   onOpenThread,
@@ -41,7 +46,13 @@ export default function EmailTriageCard({
         categories, priority scores, and summaries.
       </p>
 
-      <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+      {pendingCount > 0 && (
+        <p style={{ fontSize: '0.85em', color: '#d32f2f', marginBottom: '12px', fontWeight: 'bold' }}>
+          ● You have {pendingCount} new or updated thread(s) that haven't been triaged yet.
+        </p>
+      )}
+
+      <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
         <button
           className="btn-primary"
           onClick={onRunTriage}
@@ -53,6 +64,7 @@ export default function EmailTriageCard({
             alignItems: 'center',
             justifyContent: 'center',
             boxSizing: 'border-box',
+            position: 'relative',
           }}
         >
           {runningTriage ? (
@@ -61,30 +73,83 @@ export default function EmailTriageCard({
               <span className="spinner" style={{ lineHeight: 0, alignSelf: 'center' }}></span>
             </span>
           ) : (
-            'Run Triage'
+            <>
+              Run Triage
+              {pendingCount > 0 && (
+                <span style={{
+                  position: 'absolute',
+                  top: '-5px',
+                  right: '-5px',
+                  width: '12px',
+                  height: '12px',
+                  backgroundColor: '#ff1744',
+                  borderRadius: '50%',
+                  border: '2px solid white',
+                  boxShadow: '0 0 4px rgba(0,0,0,0.3)'
+                }} />
+              )}
+            </>
           )}
         </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+          <label style={{ fontSize: '0.85em', color: '#666' }}>Filter:</label>
+          <select
+            value={daysFilter || ''}
+            onChange={(e) => onDaysFilterChange(e.target.value ? parseInt(e.target.value) : null)}
+            style={{
+              padding: '4px 8px',
+              borderRadius: '4px',
+              border: '1px solid #ddd',
+              fontSize: '0.85em',
+              backgroundColor: '#fff',
+              color: '#333',
+              outline: 'none'
+            }}
+          >
+            <option value="">All Time</option>
+            <option value="1">Today</option>
+            <option value="3">Last 3 Days</option>
+            <option value="5">Last 5 Days</option>
+            <option value="7">Last Week</option>
+            <option value="30">Last Month</option>
+          </select>
+        </div>
+
         <button
-          className="btn-primary"
-          onClick={onLoadTriageResults}
-          disabled={runningTriage || loadingTriageResults}
+          onClick={onRefreshStats}
+          disabled={runningTriage || loadingTriageResults || checkingPending}
+          title="Refresh pending status"
           style={{
-            backgroundColor: '#5c6bc0',
-            height: '38px',
+            height: '32px',
+            width: '32px',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
             boxSizing: 'border-box',
+            padding: 0,
+            borderRadius: '50%',
+            backgroundColor: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            transition: 'background-color 0.2s',
+            color: '#5f6368',
+            outline: 'none',
           }}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(60, 64, 67, 0.1)'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
         >
-          {loadingTriageResults ? (
-            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              Loading...
-              <span className="spinner" style={{ lineHeight: 0, alignSelf: 'center' }}></span>
-            </span>
-          ) : (
-            'Load Triage Results'
-          )}
+          <svg 
+            viewBox="0 0 24 24" 
+            style={{ 
+              width: '20px', 
+              height: '20px',
+              fill: 'currentColor',
+              animation: checkingPending ? 'spin 1s linear infinite' : 'none'
+            }}
+          >
+            <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.07 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+          </svg>
         </button>
       </div>
 

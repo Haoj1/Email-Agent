@@ -23,6 +23,42 @@ async def main(drop_tables=False):
         # Initialize database (create tables)
         await init_db()
         
+        # Apply missing indexes without dropping tables
+        if not drop_tables:
+            print("🔍 Checking for missing indexes...")
+            async with engine.begin() as conn:
+                # List of indexes to ensure (table_name, index_name, columns)
+                # Based on models.py definitions
+                required_indexes = [
+                    ('assist_chat_sessions', 'idx_assist_user_created_at', 'user_id, created_at'),
+                    ('triage_tasks', 'idx_triage_task_user_created_at', 'user_id, created_at'),
+                    ('triage_results', 'idx_triage_user_created_at', 'user_id, created_at'),
+                    ('triage_results', 'idx_triage_user_updated_at', 'user_id, updated_at'),
+                    ('drafts', 'idx_draft_user_updated_at', 'user_id, updated_at'),
+                    ('calendar_proposals', 'idx_calendar_user_created_at', 'user_id, created_at'),
+                    ('calendar_proposals', 'idx_calendar_user_updated_at', 'user_id, updated_at'),
+                    ('email_embeddings', 'idx_email_embedding_user_thread', 'user_id, thread_id'),
+                ]
+                
+                for table, idx_name, cols in required_indexes:
+                    # Check if index exists
+                    check_idx = await conn.execute(text(f"""
+                        SELECT 1 FROM pg_indexes 
+                        WHERE schemaname = 'public' 
+                        AND tablename = '{table}' 
+                        AND indexname = '{idx_name}';
+                    """))
+                    if not check_idx.fetchone():
+                        print(f"  ➕ Creating missing index {idx_name} on {table}...")
+                        try:
+                            await conn.execute(text(f"CREATE INDEX {idx_name} ON {table} ({cols});"))
+                            print(f"  ✅ Created {idx_name}")
+                        except Exception as idx_err:
+                            print(f"  ⚠️  Could not create {idx_name}: {idx_err}")
+                    else:
+                        print(f"  ✨ Index {idx_name} already exists.")
+            print()
+
         # Verify tables were created
         async with engine.begin() as conn:
             result = await conn.execute(text("""

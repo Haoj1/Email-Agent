@@ -10,21 +10,23 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
   const [loadingThreads, setLoadingThreads] = useState(false);
   const [emailThreadsNextPageToken, setEmailThreadsNextPageToken] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  const [daysFilter, setDaysFilter] = useState(14); // Default to 14 days
   
   const navigate = useNavigate();
   const { getCachedThreads, setCachedThreads } = useEmailCache();
 
   useEffect(() => {
     if (user && user.authenticated) {
-      loadEmailThreads(selectedEmail, false);
+      loadEmailThreads(selectedEmail, false, false, daysFilter);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, selectedEmail]);
 
-  const loadEmailThreads = async (email = null, forceRefresh = false, isLoadMore = false) => {
+  const loadEmailThreads = async (email = null, forceRefresh = false, isLoadMore = false, days = daysFilter) => {
     if (!forceRefresh && !isLoadMore) {
       const cached = getCachedThreads(email);
-      if (cached) {
+      // Only use cache if it matches current days filter
+      if (cached && cached.days === days) {
         setEmailThreads(cached);
         return;
       }
@@ -37,7 +39,7 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
     }
     
     try {
-      const params = { max_results: 30, days: 14 };
+      const params = { max_results: 30, days: days || 14 };
       if (email) params.email = email;
       if (isLoadMore && emailThreadsNextPageToken) {
         params.page_token = emailThreadsNextPageToken;
@@ -53,6 +55,7 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
       
       const threadsData = { 
         success: true, 
+        days: days,
         data: { ...newData, threads: mergedThreads } 
       };
       
@@ -67,6 +70,11 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
     } finally {
       setLoadingThreads(false);
     }
+  };
+
+  const handleDaysFilterChange = (days) => {
+    setDaysFilter(days);
+    loadEmailThreads(selectedEmail, true, false, days);
   };
 
   const syncInbox = async () => {
@@ -103,6 +111,8 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
           onSyncInbox={syncInbox}
           emailThreads={emailThreads}
           onOpenThread={handleOpenThread}
+          daysFilter={daysFilter}
+          onDaysFilterChange={handleDaysFilterChange}
         />
       </div>
     </div>

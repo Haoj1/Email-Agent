@@ -1,18 +1,19 @@
 """
 Triage API routes - Email classification and prioritization
 """
-from fastapi import APIRouter, HTTPException, Depends, Request, Body
+from fastapi import APIRouter, HTTPException, Depends, Request, Body, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List, AsyncGenerator
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import asyncio
 import threading
 from app.database import get_db
 from app.routes.auth import get_user_credentials, get_current_user_id
 from app.services.gmail_service import GmailService
+from app.services.background_tasks import sync_and_embed_emails
 from app.agents.triage_agent import TriageAgent
 from app.models import TriageResult, User
 from sqlalchemy import select
@@ -502,11 +503,78 @@ async def run_triage_sync(
         )
 
 
+@router.get("/triage/stats")
+async def get_triage_stats(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    email: Optional[str] = None,
+    days: int = Query(7, ge=1, le=30),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get stats about pending triage items
+    """
+    try:
+        user_id = await get_current_user_id(request, db)
+        
+        # Trigger background sync and embedding whenever stats are checked
+        background_tasks.add_task(sync_and_embed_emails, user_id, email, days)
+        
+        # 1. Get credentials and Gmail service
+        credentials = await get_user_credentials(request, email, db)
+        gmail_service = GmailService(credentials)
+        
+        # 2. Get recent threads from Gmail
+        raw_threads = gmail_service.get_threads(max_results=50, days=days)
+        if not raw_threads:
+            return {"pending_count": 0}
+            
+        # 3. Normalize and get thread IDs
+        thread_ids = []
+        thread_message_counts = {}
+        for raw in raw_threads:
+            normalized = gmail_service.normalize_thread(raw)
+            if normalized and normalized.get('thread_id'):
+                tid = normalized['thread_id']
+                thread_ids.append(tid)
+                thread_message_counts[tid] = normalized.get('message_count', 0)
+        
+        if not thread_ids:
+            return {"pending_count": 0}
+            
+        # 4. Check database for existing triage results
+        query = select(TriageResult).where(
+            TriageResult.user_id == user_id,
+            TriageResult.thread_id.in_(thread_ids)
+        )
+        result = await db.execute(query)
+        existing_results = result.scalars().all()
+        existing_map = {r.thread_id: r.message_count for r in existing_results}
+        
+        # 5. Count how many need triage (new or updated)
+        pending_count = 0
+        for tid in thread_ids:
+            existing_count = existing_map.get(tid)
+            current_count = thread_message_counts.get(tid, 0)
+            
+            if existing_count is None or current_count > existing_count:
+                pending_count += 1
+                
+        return {
+            "success": True,
+            "pending_count": pending_count
+        }
+    except Exception as e:
+        print(f"Error getting triage stats: {e}")
+        return {"pending_count": 0}
+
+
 @router.get("/triage/results")
 async def get_triage_results(
     request: Request,
     email: Optional[str] = None,  # Can now be used for filtering
     label: Optional[str] = None,
+    days: Optional[int] = Query(None, ge=1, le=90),
     limit: int = 50,
     skip: int = 0,
     db: AsyncSession = Depends(get_db)
@@ -517,6 +585,7 @@ async def get_triage_results(
     Query parameters:
     - email: Filter by source email
     - label: Filter by label (NEEDS_REPLY, FYI, ARCHIVE, SPAM_LIKE)
+    - days: Filter by number of days (created_at)
     - limit: Maximum number of results
     - skip: Number of results to skip (for pagination)
     """
@@ -531,6 +600,10 @@ async def get_triage_results(
             
         if label:
             query = query.where(TriageResult.label == label)
+
+        if days:
+            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            query = query.where(TriageResult.created_at >= cutoff_date)
         
         query = query.order_by(TriageResult.priority.desc(), TriageResult.created_at.desc())
         query = query.offset(skip).limit(limit)
@@ -545,6 +618,9 @@ async def get_triage_results(
             count_query = count_query.where(TriageResult.email == email)
         if label:
             count_query = count_query.where(TriageResult.label == label)
+        if days:
+            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            count_query = count_query.where(TriageResult.created_at >= cutoff_date)
             
         count_result = await db.execute(count_query)
         total_count = count_result.scalar()

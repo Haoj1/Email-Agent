@@ -5,7 +5,7 @@ import os
 # We'll check the environment after importing settings
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'  # Set by default for development
 
-from fastapi import APIRouter, Request, HTTPException, Depends, Query
+from fastapi import APIRouter, Request, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -20,6 +20,7 @@ import re
 from app.config import settings, GOOGLE_SCOPES
 from app.database import get_db
 from app.models import User, UserEmail, OAuthToken
+from app.services.background_tasks import sync_and_embed_emails
 
 # In production, remove the insecure transport setting
 # For now, we keep it enabled for local development
@@ -260,6 +261,7 @@ async def google_callback(
 @router.get("/me")
 async def get_current_user(
     request: Request,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Get current authenticated user from database"""
@@ -275,6 +277,9 @@ async def get_current_user(
         user = await db.get(User, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
+        
+        # Trigger background sync and embedding for the user
+        background_tasks.add_task(sync_and_embed_emails, user_id)
         
         # Get all emails for user
         result = await db.execute(

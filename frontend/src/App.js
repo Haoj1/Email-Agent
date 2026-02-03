@@ -60,31 +60,44 @@ function App() {
     <EmailCacheProvider>
       <Router>
         <div className="App">
-          {user && (
-            <Navigation
-              user={user}
-              selectedEmail={selectedEmail}
-              onSelectEmail={handleSelectEmail}
-              onLogout={handleLogout}
-            />
-          )}
           <Routes>
             <Route path="/" element={<Login />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
-            <Route 
-              path="/dashboard" 
-              element={<Dashboard user={user} selectedEmail={selectedEmail} onSelectEmail={handleSelectEmail} onLogout={handleLogout} />} 
-            />
-            <Route 
-              path="/threads" 
-              element={<EmailThreadsPage user={user} selectedEmail={selectedEmail} onSelectEmail={handleSelectEmail} onLogout={handleLogout} />} 
-            />
-            <Route 
-              path="/triage" 
-              element={<EmailTriagePage user={user} selectedEmail={selectedEmail} onSelectEmail={handleSelectEmail} onLogout={handleLogout} />} 
-            />
-            <Route path="/thread/:threadId" element={<ThreadDetail />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
+            {user ? (
+              <Route
+                path="*"
+                element={
+                  <>
+                    <Navigation
+                      user={user}
+                      selectedEmail={selectedEmail}
+                      onSelectEmail={handleSelectEmail}
+                      onLogout={handleLogout}
+                    />
+                    <div className="main-content">
+                      <Routes>
+                        <Route
+                          path="/dashboard"
+                          element={<Dashboard user={user} selectedEmail={selectedEmail} onSelectEmail={handleSelectEmail} onLogout={handleLogout} />}
+                        />
+                        <Route
+                          path="/threads"
+                          element={<EmailThreadsPage user={user} selectedEmail={selectedEmail} onSelectEmail={handleSelectEmail} onLogout={handleLogout} />}
+                        />
+                        <Route
+                          path="/triage"
+                          element={<EmailTriagePage user={user} selectedEmail={selectedEmail} onSelectEmail={handleSelectEmail} onLogout={handleLogout} />}
+                        />
+                        <Route path="/thread/:threadId" element={<ThreadDetail />} />
+                        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                      </Routes>
+                    </div>
+                  </>
+                }
+              />
+            ) : (
+              <Route path="*" element={<Navigate to="/" replace />} />
+            )}
           </Routes>
         </div>
       </Router>

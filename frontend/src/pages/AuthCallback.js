@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { api } from '../services/api';
 import './AuthCallback.css';
 
 function AuthCallback() {
@@ -13,7 +12,6 @@ function AuthCallback() {
     const success = searchParams.get('success');
     const error = searchParams.get('error');
     const email = searchParams.get('email');
-    const userId = searchParams.get('user_id');
     const action = searchParams.get('action');
 
     if (success === 'true') {
@@ -23,10 +21,11 @@ function AuthCallback() {
       } else {
         setMessage(`Successfully authenticated as ${email}`);
       }
-      // Redirect to dashboard after 2 seconds
+      // Redirect to dashboard after 1.5 seconds
       setTimeout(() => {
-        navigate('/dashboard');
-      }, 2000);
+        // Force a full check of auth state
+        window.location.href = '/dashboard';
+      }, 1500);
     } else {
       setStatus('error');
       setMessage(error || 'Authentication failed');
