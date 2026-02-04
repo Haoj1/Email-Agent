@@ -3,11 +3,12 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useEmailCache } from '../contexts/EmailCacheContext';
 import { api } from '../services/api';
 import EmailAccountsCard from '../components/dashboard/EmailAccountsCard';
-import ApiAccessTestCard from '../components/dashboard/ApiAccessTestCard';
+import AssistChatCard from '../components/dashboard/AssistChatCard';
 import EmailThreadsCard from '../components/dashboard/EmailThreadsCard';
 import InboxSyncCard from '../components/dashboard/InboxSyncCard';
 import EmailTriageCard from '../components/dashboard/EmailTriageCard';
 import NextStepsCard from '../components/dashboard/NextStepsCard';
+import AssistChatPanel from '../components/assist/AssistChatPanel';
 import './Dashboard.css';
 
 function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
@@ -17,8 +18,6 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     checkPendingTriage, 
     setPendingTriageCount 
   } = useEmailCache();
-  const [gmailTest, setGmailTest] = useState(null);
-  const [calendarTest, setCalendarTest] = useState(null);
   const [emailThreads, setEmailThreads] = useState(null);
   const [loadingThreads, setLoadingThreads] = useState(false);
   const [emailThreadsNextPageToken, setEmailThreadsNextPageToken] = useState(null);
@@ -31,12 +30,12 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   const [loadingTriageResults, setLoadingTriageResults] = useState(false);
   const [triageProgress, setTriageProgress] = useState({ current: 0, total: 0, progress: 0 });
   const [triageStatus, setTriageStatus] = useState('');
-  const [testing, setTesting] = useState(false);
   const pendingTriageCheckIntervalRef = useRef(null);
   const [triageDaysFilter, setTriageDaysFilter] = useState(null);
   
   const [addingEmail, setAddingEmail] = useState(false);
   const [addEmailError, setAddEmailError] = useState(null);
+  const [showAssistChat, setShowAssistChat] = useState(false);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const {
@@ -75,37 +74,6 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     return () => stopTriagePolling();
   }, []);
 
-  const testGmail = async () => {
-    setTesting(true);
-    setGmailTest(null);
-    try {
-      const response = await api.get('/auth/test/gmail');
-      setGmailTest({ success: true, data: response.data });
-    } catch (error) {
-      setGmailTest({
-        success: false,
-        error: error.response?.data?.error || error.message,
-      });
-    } finally {
-      setTesting(false);
-    }
-  };
-
-  const testCalendar = async () => {
-    setTesting(true);
-    setCalendarTest(null);
-    try {
-      const response = await api.get('/auth/test/calendar');
-      setCalendarTest({ success: true, data: response.data });
-    } catch (error) {
-      setCalendarTest({
-        success: false,
-        error: error.response?.data?.error || error.message,
-      });
-    } finally {
-      setTesting(false);
-    }
-  };
 
   const loadEmailThreads = async (email = null, forceRefresh = false, isLoadMore = false, days = 14) => {
     if (!forceRefresh && !isLoadMore) {
@@ -410,13 +378,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
           addEmailError={addEmailError}
         />
 
-        <ApiAccessTestCard
-          testing={testing}
-          onTestGmail={testGmail}
-          onTestCalendar={testCalendar}
-          gmailTest={gmailTest}
-          calendarTest={calendarTest}
-        />
+        <AssistChatCard onOpenChat={() => setShowAssistChat(true)} />
 
         <EmailThreadsCard
           loadingThreads={loadingThreads}
@@ -450,6 +412,12 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
 
         <InboxSyncCard syncResult={syncResult} onOpenThread={handleOpenThread} />
         <NextStepsCard />
+      </div>
+      <div className={`thread-chat-wrapper ${showAssistChat ? 'open' : ''}`}>
+        <AssistChatPanel
+          onClose={() => setShowAssistChat(false)}
+          selectedEmail={selectedEmail}
+        />
       </div>
     </div>
   );

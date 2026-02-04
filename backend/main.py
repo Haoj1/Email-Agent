@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 from app.config import settings
-from app.routes import auth, health, emails, gmail, triage, thread_chat
+from app.routes import auth, health, emails, gmail, triage, thread_chat, assist_chat
 
 app = FastAPI(
     title="Email Agent API",
@@ -28,6 +28,7 @@ app.include_router(emails.router, prefix="/api", tags=["emails"])
 app.include_router(gmail.router, prefix="/api", tags=["gmail"])
 app.include_router(triage.router, prefix="/api", tags=["triage"])
 app.include_router(thread_chat.router, prefix="/api", tags=["thread-chat"])
+app.include_router(assist_chat.router, prefix="/api", tags=["assist-chat"])
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):

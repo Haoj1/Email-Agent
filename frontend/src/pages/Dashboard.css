@@ -1,6 +1,21 @@
 .dashboard-container {
   min-height: 100vh;
   background: #f5f5f5;
+  position: relative;
+}
+
+.thread-chat-wrapper {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 0;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.thread-chat-wrapper.open {
+  pointer-events: auto;
 }
 
 .dashboard-header {

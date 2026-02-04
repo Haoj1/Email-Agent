@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { EmailCacheProvider, useEmailCache } from './contexts/EmailCacheContext';
 import { api } from './services/api';
 import Navigation from './components/dashboard/Navigation';
@@ -23,6 +23,25 @@ function AppContent() {
       return null;
     }
   });
+  
+  // Component to conditionally show Navigation
+  function ConditionalNavigation({ user, selectedEmail, onSelectEmail, onLogout }) {
+    const location = useLocation();
+    const isThreadDetail = location.pathname.startsWith('/thread/');
+    
+    if (isThreadDetail) {
+      return null; // Don't show Navigation on ThreadDetail pages
+    }
+    
+    return (
+      <Navigation
+        user={user}
+        selectedEmail={selectedEmail}
+        onSelectEmail={onSelectEmail}
+        onLogout={onLogout}
+      />
+    );
+  }
 
   useEffect(() => {
     checkAuth();
@@ -71,7 +90,7 @@ function AppContent() {
               path="*"
               element={
                 <>
-                  <Navigation
+                  <ConditionalNavigation
                     user={user}
                     selectedEmail={selectedEmail}
                     onSelectEmail={handleSelectEmail}
