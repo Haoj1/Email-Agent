@@ -263,6 +263,8 @@ function AssistChatPanel({ onClose, selectedEmail }) {
     { label: 'Need Attention', prompt: 'What emails need my attention?' },
   ];
 
+  const appHelpPrompt = 'What can this email agent app do? How do I use it?';
+
   const handleQuickAction = (prompt) => {
     setInput(prompt);
     setTimeout(() => {
@@ -557,6 +559,14 @@ function AssistChatPanel({ onClose, selectedEmail }) {
               <div className="chat-empty-state">
                 <p>Ask me anything about your emails!</p>
                 <div className="quick-actions">
+                  <button
+                    className="quick-action-btn primary"
+                    onClick={() => handleQuickAction(appHelpPrompt)}
+                    disabled={loading}
+                    style={{ marginBottom: '12px' }}
+                  >
+                    📖 How to Use This App
+                  </button>
                   {quickActions.map((action, idx) => (
                     <button
                       key={idx}

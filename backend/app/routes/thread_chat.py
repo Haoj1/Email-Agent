@@ -460,3 +460,107 @@ async def generate_draft_reply(
             "X-Accel-Buffering": "no"
         }
     )
+
+
+@router.post("/thread-chat/save-draft")
+async def save_draft_to_gmail(
+    request: Request,
+    save_request: SaveDraftRequest = Body(...),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Save an existing draft to Gmail.
+    Automatically finds the thread in the correct email account.
+    
+    Args:
+        thread_id: Gmail thread ID
+        subject: Draft subject
+        body: Draft body
+        to: Recipient email address
+        email: Email account to use (optional, will auto-detect if thread belongs to another account)
+    """
+    try:
+        user_id = await get_current_user_id(request, db)
+        
+        # Get all user's email accounts
+        result = await db.execute(
+            select(UserEmail).where(UserEmail.user_id == user_id)
+        )
+        user_emails = result.scalars().all()
+        
+        if not user_emails:
+            raise HTTPException(status_code=404, detail="No email accounts found")
+        
+        # Sort emails: specified email first, then primary, then others
+        email_list = []
+        if save_request.email:
+            for ue in user_emails:
+                if ue.email == save_request.email:
+                    email_list.insert(0, ue.email)
+                elif ue.is_primary and save_request.email not in email_list:
+                    email_list.append(ue.email)
+                elif ue.email not in email_list:
+                    email_list.append(ue.email)
+        else:
+            # Primary first, then others
+            for ue in user_emails:
+                if ue.is_primary:
+                    email_list.insert(0, ue.email)
+                else:
+                    email_list.append(ue.email)
+        
+        # Try to find the thread in one of the email accounts
+        gmail_service = None
+        final_email = None
+        
+        for email_account in email_list:
+            try:
+                credentials = await get_user_credentials(request, email_account, db)
+                test_service = GmailService(credentials)
+                # Try to get the thread to verify it exists in this account
+                test_service.get_thread_full(save_request.thread_id)
+                # Success! Use this email account
+                gmail_service = test_service
+                final_email = email_account
+                break
+            except Exception as e:
+                # Thread not found in this account, try next
+                continue
+        
+        if not gmail_service:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Thread {save_request.thread_id} not found in any of your email accounts"
+            )
+        
+        # Create draft using the correct email account
+        draft_result = gmail_service.create_draft(
+            to=save_request.to,
+            subject=save_request.subject,
+            body=save_request.body,
+            thread_id=save_request.thread_id
+        )
+        
+        if draft_result.get("success"):
+            return {
+                "success": True,
+                "gmail_draft_id": draft_result.get("draft_id"),
+                "email_account": final_email
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=draft_result.get("error", "Failed to save draft to Gmail")
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_str = str(e)
+        print(f"Error saving draft: {e}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save draft: {error_str}"
+        )
