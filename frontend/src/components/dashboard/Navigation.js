@@ -61,8 +61,8 @@ export default function Navigation({
         overflowX: 'auto'
       }}>
         <button style={navItemStyle('/dashboard')} onClick={() => navigate('/dashboard')}>Dashboard</button>
-        <button style={navItemStyle('/threads')} onClick={() => navigate('/threads')}>Email Threads</button>
-        <button style={navItemStyle('/triage')} onClick={() => navigate('/triage')}>Triage Agent</button>
+        <button style={navItemStyle('/threads')} onClick={() => navigate('/threads')}>Conversations</button>
+        <button style={navItemStyle('/triage')} onClick={() => navigate('/triage')}>Priority Inbox</button>
       </div>
       
       <div style={{ 

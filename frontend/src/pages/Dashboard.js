@@ -5,9 +5,7 @@ import { api } from '../services/api';
 import EmailAccountsCard from '../components/dashboard/EmailAccountsCard';
 import AssistChatCard from '../components/dashboard/AssistChatCard';
 import EmailThreadsCard from '../components/dashboard/EmailThreadsCard';
-import InboxSyncCard from '../components/dashboard/InboxSyncCard';
 import EmailTriageCard from '../components/dashboard/EmailTriageCard';
-import NextStepsCard from '../components/dashboard/NextStepsCard';
 import AssistChatPanel from '../components/assist/AssistChatPanel';
 import './Dashboard.css';
 
@@ -16,22 +14,23 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     pendingTriageCount, 
     checkingPending, 
     checkPendingTriage, 
-    setPendingTriageCount 
+    triageRunning,
+    triageProgress,
+    triageStatus,
+    triageLastComplete,
+    triageLastError,
+    runTriage
   } = useEmailCache();
   const [emailThreads, setEmailThreads] = useState(null);
   const [loadingThreads, setLoadingThreads] = useState(false);
   const [emailThreadsNextPageToken, setEmailThreadsNextPageToken] = useState(null);
-  const [syncResult, setSyncResult] = useState(null);
-  const [syncing, setSyncing] = useState(false);
   const [triageResults, setTriageResults] = useState(null);
   const [triagePage, setTriagePage] = useState(0);
   const TRIAGE_PAGE_SIZE = 20;
-  const [runningTriage, setRunningTriage] = useState(false);
   const [loadingTriageResults, setLoadingTriageResults] = useState(false);
-  const [triageProgress, setTriageProgress] = useState({ current: 0, total: 0, progress: 0 });
-  const [triageStatus, setTriageStatus] = useState('');
   const pendingTriageCheckIntervalRef = useRef(null);
-  const [triageDaysFilter, setTriageDaysFilter] = useState(null);
+  // Default to last 3 days for better signal-to-noise
+  const [triageDaysFilter, setTriageDaysFilter] = useState(3);
   
   const [addingEmail, setAddingEmail] = useState(false);
   const [addEmailError, setAddEmailError] = useState(null);
@@ -41,8 +40,6 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   const {
     getCachedThreads,
     setCachedThreads,
-    getCachedSyncResult,
-    setCachedSyncResult,
     getCachedTriageResults,
     setCachedTriageResults,
   } = useEmailCache();
@@ -135,93 +132,11 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     };
   };
 
-  const runTriage = async (forceRefresh = false) => {
-    if (!forceRefresh) {
-      const cached = getCachedTriageResults(null);
-      if (cached) {
-        setTriageResults(cached);
-        return;
-      }
-    }
-
+  const handleRunTriage = async () => {
     stopTriagePolling();
-    setRunningTriage(true);
-    setTriageProgress({ current: 0, total: 0, progress: 0 });
-    setTriageStatus('Starting triage...');
-    if (forceRefresh) setTriageResults(null);
-
-    try {
-      const baseURL = api.defaults.baseURL || 'http://localhost:5001/api';
-      const response = await fetch(`${baseURL}/triage/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          max_results: 100,
-          days: 7,
-          email: selectedEmail || null,
-        }),
-      });
-
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.type === 'status') setTriageStatus(data.message || '');
-              else if (data.type === 'progress') {
-                setTriageProgress({
-                  current: data.current || 0,
-                  total: data.total || 0,
-                  progress: data.progress || 0,
-                });
-              } else if (data.type === 'complete') {
-                const triageData = sortTriageData({
-                  success: data.success,
-                  data: {
-                    processed_count: data.processed_count,
-                    results: data.results || [],
-                    message: data.message,
-                  },
-                });
-                setTriageResults(triageData);
-                setCachedTriageResults(null, triageData);
-                setRunningTriage(false);
-                setTriageStatus('');
-                if (setPendingTriageCount) {
-                  setPendingTriageCount(0); // Clear pending count after successful run
-                // Force check after triage to update count
-                checkPendingTriage(selectedEmail, true);
-                }
-                // Auto-refresh results to ensure everything is in sync
-                loadTriageResults(null, true);
-                startTriagePolling();
-              } else if (data.type === 'error') {
-                setTriageResults({ success: false, error: data.error || 'Unknown error' });
-                setRunningTriage(false);
-                setTriageStatus('');
-              }
-            } catch (e) { console.error('Error parsing SSE data:', e); }
-          }
-        }
-      }
-    } catch (error) {
-      setTriageResults({ success: false, error: error.message });
-      setRunningTriage(false);
-      setTriageStatus('');
-    }
+    // Clear old results so progress UI is visible while running
+    setTriageResults(null);
+    runTriage({ email: selectedEmail || null, days: 7, max_results: 100 });
   };
 
   const loadTriageResults = async (label = null, forceRefresh = false, returnData = false, isLoadMore = false, days = triageDaysFilter) => {
@@ -279,7 +194,6 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
       const hasResults = data?.success && Array.isArray(data.data?.results) && data.data.results.length > 0;
       if (hasResults || attempts >= TRIAGE_POLL_MAX_ATTEMPTS) {
         stopTriagePolling();
-        setRunningTriage(false);
         return;
       }
       triagePollingRef.current = setTimeout(poll, TRIAGE_POLL_INTERVAL);
@@ -287,26 +201,29 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     triagePollingRef.current = setTimeout(poll, TRIAGE_POLL_INTERVAL);
   };
 
-  const syncInbox = async (forceRefresh = false) => {
-    if (!forceRefresh) {
-      const cached = getCachedSyncResult(selectedEmail);
-      if (cached) { setSyncResult(cached); return; }
-    }
+  useEffect(() => {
+    if (!triageLastComplete) return;
 
-    setSyncing(true);
-    if (forceRefresh) setSyncResult(null);
-    try {
-      const response = await api.post('/gmail/sync', {
-        max_results: 100, days: 30, email: selectedEmail || null,
-      });
-      const syncData = { success: true, data: response.data };
-      setSyncResult(syncData);
-      setCachedSyncResult(selectedEmail, syncData);
-    } catch (error) {
-      setSyncResult({ success: false, error: error.response?.data?.detail || error.message });
-    } finally { setSyncing(false); }
-  };
+    const triageData = sortTriageData({
+      success: triageLastComplete.success,
+      data: {
+        processed_count: triageLastComplete.processed_count,
+        results: triageLastComplete.results || [],
+        message: triageLastComplete.message,
+      },
+    });
 
+    setTriageResults(triageData);
+    setCachedTriageResults(null, triageData);
+    loadTriageResults(null, true);
+    startTriagePolling();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triageLastComplete?.run_id]);
+
+  useEffect(() => {
+    if (!triageLastError) return;
+    setTriageResults({ success: false, error: triageLastError.error || 'Unknown error' });
+  }, [triageLastError]);
 
   useEffect(() => {
     if (user && user.authenticated) {
@@ -385,8 +302,6 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
           onRefreshEmails={() => loadEmailThreads(selectedEmail, true)}
           onLoadMore={() => loadEmailThreads(selectedEmail, false, true, emailThreads?.days)}
           hasMore={!!emailThreadsNextPageToken}
-          syncing={syncing}
-          onSyncInbox={() => syncInbox(true)}
           emailThreads={emailThreads}
           onOpenThread={handleOpenThread}
           daysFilter={emailThreads?.days || 14}
@@ -394,7 +309,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
         />
 
         <EmailTriageCard
-          runningTriage={runningTriage}
+          runningTriage={triageRunning}
           loadingTriageResults={loadingTriageResults}
           triageResults={triageResults}
           triageProgress={triageProgress}
@@ -403,15 +318,12 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
           checkingPending={checkingPending}
           daysFilter={triageDaysFilter}
           onDaysFilterChange={handleDaysFilterChange}
-          onRunTriage={runTriage}
+          onRunTriage={handleRunTriage}
           onRefreshStats={() => checkPendingTriage(selectedEmail, true)}
           onLoadTriageResults={() => loadTriageResults(null, true)}
           onLoadMore={() => loadTriageResults(null, false, false, true)}
           onOpenThread={handleOpenThread}
         />
-
-        <InboxSyncCard syncResult={syncResult} onOpenThread={handleOpenThread} />
-        <NextStepsCard />
       </div>
       <div className={`thread-chat-wrapper ${showAssistChat ? 'open' : ''}`}>
         <AssistChatPanel

@@ -10,16 +10,19 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
     pendingTriageCount, 
     checkingPending, 
     checkPendingTriage, 
-    setPendingTriageCount 
+    triageRunning,
+    triageProgress,
+    triageStatus,
+    triageLastComplete,
+    triageLastError,
+    runTriage
   } = useEmailCache();
   const [triageResults, setTriageResults] = useState(null);
   const [triagePage, setTriagePage] = useState(0);
   const TRIAGE_PAGE_SIZE = 20;
-  const [runningTriage, setRunningTriage] = useState(false);
   const [loadingTriageResults, setLoadingTriageResults] = useState(false);
-  const [triageProgress, setTriageProgress] = useState({ current: 0, total: 0, progress: 0 });
-  const [triageStatus, setTriageStatus] = useState('');
-  const [triageDaysFilter, setTriageDaysFilter] = useState(null);
+  // Default to last 3 days for better signal-to-noise
+  const [triageDaysFilter, setTriageDaysFilter] = useState(3);
   
   const navigate = useNavigate();
   const triagePollingRef = useRef(null);
@@ -78,77 +81,11 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
     };
   };
 
-  const runTriage = async (forceRefresh = false) => {
+  const handleRunTriage = async () => {
     stopTriagePolling();
-    setRunningTriage(true);
-    setTriageProgress({ current: 0, total: 0, progress: 0 });
-    setTriageStatus('Starting triage...');
-    if (forceRefresh) setTriageResults(null);
-
-    try {
-      const baseURL = api.defaults.baseURL || 'http://localhost:5001/api';
-      const response = await fetch(`${baseURL}/triage/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          max_results: 100,
-          days: 7,
-          email: selectedEmail || null,
-        }),
-      });
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = JSON.parse(line.slice(6));
-            if (data.type === 'status') setTriageStatus(data.message || '');
-            else if (data.type === 'progress') {
-              setTriageProgress({
-                current: data.current || 0,
-                total: data.total || 0,
-                progress: data.progress || 0,
-              });
-            } else if (data.type === 'complete') {
-              const triageData = sortTriageData({
-                success: data.success,
-                data: {
-                  processed_count: data.processed_count,
-                  results: data.results || [],
-                  message: data.message,
-                },
-              });
-              setTriageResults(triageData);
-              setCachedTriageResults(null, triageData);
-              setRunningTriage(false);
-              setTriageStatus('');
-              setPendingTriageCount(0); // Clear pending count after successful run
-              // Force check after triage to update count
-              checkPendingTriage(selectedEmail, true);
-              // Auto-refresh results to ensure everything is in sync
-              loadTriageResults(null, true);
-            } else if (data.type === 'error') {
-              setTriageResults({ success: false, error: data.error || 'Unknown error' });
-              setRunningTriage(false);
-              setTriageStatus('');
-            }
-          }
-        }
-      }
-    } catch (error) {
-      setTriageResults({ success: false, error: error.message });
-      setRunningTriage(false);
-    }
+    // Clear old results so progress UI is visible while running
+    setTriageResults(null);
+    runTriage({ email: selectedEmail || null, days: 7, max_results: 100 });
   };
 
   const loadTriageResults = async (label = null, forceRefresh = false, returnData = false, isLoadMore = false, days = triageDaysFilter) => {
@@ -206,11 +143,34 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
     loadTriageResults(null, true, false, false, days);
   };
 
+  useEffect(() => {
+    if (!triageLastComplete) return;
+
+    const triageData = sortTriageData({
+      success: triageLastComplete.success,
+      data: {
+        processed_count: triageLastComplete.processed_count,
+        results: triageLastComplete.results || [],
+        message: triageLastComplete.message,
+      },
+    });
+
+    setTriageResults(triageData);
+    setCachedTriageResults(null, triageData);
+    loadTriageResults(null, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triageLastComplete?.run_id]);
+
+  useEffect(() => {
+    if (!triageLastError) return;
+    setTriageResults({ success: false, error: triageLastError.error || 'Unknown error' });
+  }, [triageLastError]);
+
   return (
     <div className="dashboard-container">
       <div className="dashboard-content full-width">
         <EmailTriageCard
-          runningTriage={runningTriage}
+          runningTriage={triageRunning}
           loadingTriageResults={loadingTriageResults}
           triageResults={triageResults}
           triageProgress={triageProgress}
@@ -219,7 +179,7 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
           checkingPending={checkingPending}
           daysFilter={triageDaysFilter}
           onDaysFilterChange={handleDaysFilterChange}
-          onRunTriage={runTriage}
+          onRunTriage={handleRunTriage}
           onRefreshStats={() => checkPendingTriage(selectedEmail, true)}
           onLoadTriageResults={() => loadTriageResults(null, true)}
           onLoadMore={() => loadTriageResults(null, false, false, true)}

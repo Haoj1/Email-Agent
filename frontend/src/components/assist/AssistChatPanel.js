@@ -557,7 +557,7 @@ function AssistChatPanel({ onClose, selectedEmail }) {
           <div className="thread-chat-messages">
             {messages.length === 0 ? (
               <div className="chat-empty-state">
-                <p>Ask me anything about your emails!</p>
+                <p>Ask Inbox Copilot anything about your emails!</p>
                 <div className="quick-actions">
                   <button
                     className="quick-action-btn primary"

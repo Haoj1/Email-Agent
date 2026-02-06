@@ -24,7 +24,7 @@ export default function EmailTriageCard({
   return (
     <div className="card" style={isStandalonePage ? { maxWidth: '100%', width: '100%' } : {}}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <h2>Email Triage Agent</h2>
+      <h2>Priority Inbox</h2>
         {!isStandalonePage && (
           <button 
             onClick={() => navigate('/triage')}
@@ -42,13 +42,13 @@ export default function EmailTriageCard({
         )}
       </div>
       <p style={{ fontSize: '0.9em', color: '#666', marginBottom: '16px' }}>
-        Classify and prioritize your emails using AI. Run triage on recent threads to get
-        categories, priority scores, and summaries.
+        AI highlights what matters most. Scan recent conversations to get categories, priority scores,
+        and summaries.
       </p>
 
       {pendingCount > 0 && (
         <p style={{ fontSize: '0.85em', color: '#d32f2f', marginBottom: '12px', fontWeight: 'bold' }}>
-          ● You have {pendingCount} new or updated thread(s) that haven't been triaged yet.
+          ● You have {pendingCount} new or updated conversation(s) that haven't been prioritized yet.
         </p>
       )}
 
@@ -69,12 +69,12 @@ export default function EmailTriageCard({
         >
           {runningTriage ? (
             <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              Running Triage...
+              Updating Priorities...
               <span className="spinner" style={{ lineHeight: 0, alignSelf: 'center' }}></span>
             </span>
           ) : (
             <>
-              Run Triage
+              Update Priorities
               {pendingCount > 0 && (
                 <span style={{
                   position: 'absolute',
@@ -93,7 +93,7 @@ export default function EmailTriageCard({
         </button>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
-          <label style={{ fontSize: '0.85em', color: '#666' }}>Filter:</label>
+          <label style={{ fontSize: '0.85em', color: '#666' }}>Time Range:</label>
           <select
             value={daysFilter || ''}
             onChange={(e) => onDaysFilterChange(e.target.value ? parseInt(e.target.value) : null)}
@@ -153,7 +153,7 @@ export default function EmailTriageCard({
         </button>
       </div>
 
-      {(runningTriage || loadingTriageResults) && !triageResults && (
+      {runningTriage && (
         <div
           style={{
             padding: '20px',
@@ -174,10 +174,10 @@ export default function EmailTriageCard({
               margin: '0 auto 12px',
             }}
           ></div>
-          {runningTriage && triageProgress.total > 0 ? (
+          {triageProgress.total > 0 ? (
             <>
               <p style={{ marginBottom: '12px' }}>
-                {triageStatus || 'Running triage on emails...'}
+                {triageStatus || 'Scanning for priorities...'}
               </p>
               <div
                 style={{
@@ -218,16 +218,39 @@ export default function EmailTriageCard({
                 </span>
               </div>
               <p style={{ fontSize: '0.9em', color: '#888' }}>
-                Processing {triageProgress.current} of {triageProgress.total} threads
+                Processing {triageProgress.current} of {triageProgress.total} conversations
               </p>
             </>
           ) : (
             <p>
-              {runningTriage
-                ? triageStatus || 'Running triage on emails... (estimated ~1 minute)'
-                : 'Loading triage results...'}
+              {triageStatus || 'Scanning for priorities... (estimated ~1 minute)'}
             </p>
           )}
+        </div>
+      )}
+
+      {loadingTriageResults && !runningTriage && !triageResults && (
+        <div
+          style={{
+            padding: '20px',
+            textAlign: 'center',
+            backgroundColor: '#f5f5f5',
+            borderRadius: '4px',
+            color: '#666',
+          }}
+        >
+          <div
+            className="spinner"
+            style={{
+              width: '24px',
+              height: '24px',
+              borderWidth: '3px',
+              borderColor: '#7b1fa2',
+              borderTopColor: '#fff',
+              margin: '0 auto 12px',
+            }}
+          ></div>
+          <p>Loading priority results...</p>
         </div>
       )}
 
@@ -236,14 +259,14 @@ export default function EmailTriageCard({
           {triageResults.success ? (
             <div>
               {triageResults.data.processed_count !== undefined ? (
-                <p>✓ Successfully triaged {triageResults.data.processed_count} threads</p>
+                <p>✓ Updated priorities for {triageResults.data.processed_count} conversations</p>
               ) : (
-                <p>✓ Found {triageResults.data.count || 0} triage results</p>
+                <p>✓ Found {triageResults.data.count || 0} priority results</p>
               )}
 
               {triageResults.data.results && triageResults.data.results.length > 0 && (
                 <div className="email-list" style={{ marginTop: '20px' }}>
-                  <h4>Triage Results:</h4>
+                  <h4>Priority Results:</h4>
                   <div style={{ maxHeight: '600px', overflowY: 'auto' }}>
                     {triageResults.data.results.map((result, index) => {
                       const priorityColor =
@@ -365,7 +388,7 @@ export default function EmailTriageCard({
                               onClick={() => onOpenThread(result.thread_id)}
                               style={{ padding: '4px 12px', fontSize: '0.85em' }}
                             >
-                              View Thread
+                              Open Conversation
                             </button>
                           </div>
                         </div>
@@ -408,7 +431,7 @@ export default function EmailTriageCard({
             color: '#666',
           }}
         >
-          Click "Run Triage" to classify and prioritize your emails using AI.
+          Click "Update Priorities" to scan recent conversations and highlight what matters.
         </div>
       )}
     </div>

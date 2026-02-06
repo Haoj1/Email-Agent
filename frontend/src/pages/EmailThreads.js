@@ -9,7 +9,6 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
   const [emailThreads, setEmailThreads] = useState(null);
   const [loadingThreads, setLoadingThreads] = useState(false);
   const [emailThreadsNextPageToken, setEmailThreadsNextPageToken] = useState(null);
-  const [syncing, setSyncing] = useState(false);
   const [daysFilter, setDaysFilter] = useState(14); // Default to 14 days
   
   const navigate = useNavigate();
@@ -77,22 +76,6 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
     loadEmailThreads(selectedEmail, true, false, days);
   };
 
-  const syncInbox = async () => {
-    setSyncing(true);
-    try {
-      await api.post('/gmail/sync', {
-        max_results: 100,
-        days: 30,
-        email: selectedEmail || null,
-      });
-      loadEmailThreads(selectedEmail, true);
-    } catch (error) {
-      console.error('Sync error:', error);
-    } finally {
-      setSyncing(false);
-    }
-  };
-
   const handleOpenThread = (threadId) => {
     const params = new URLSearchParams();
     if (selectedEmail) params.set('email', selectedEmail);
@@ -107,8 +90,6 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
           onRefreshEmails={() => loadEmailThreads(selectedEmail, true)}
           onLoadMore={() => loadEmailThreads(selectedEmail, false, true)}
           hasMore={!!emailThreadsNextPageToken}
-          syncing={syncing}
-          onSyncInbox={syncInbox}
           emailThreads={emailThreads}
           onOpenThread={handleOpenThread}
           daysFilter={daysFilter}

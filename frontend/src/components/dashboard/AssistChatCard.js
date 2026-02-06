@@ -3,15 +3,15 @@ import React from 'react';
 export default function AssistChatCard({ onOpenChat }) {
   return (
     <div className="card">
-      <h2>Assist Chat Agent</h2>
+      <h2>Inbox Copilot</h2>
       <p>
-        Ask questions about your emails, find important messages, and get help with email management.
-        The agent can search your emails using semantic search and query triage results.
+        Ask questions about your inbox, find important messages, and get help managing email.
+        It can search by meaning and query your priority results.
       </p>
 
       <div style={{ marginTop: '20px' }}>
         <button className="btn-primary" onClick={onOpenChat}>
-          Open Assist Chat
+          Open Inbox Copilot
         </button>
       </div>
 
@@ -20,7 +20,7 @@ export default function AssistChatCard({ onOpenChat }) {
         <ul style={{ marginTop: '8px', paddingLeft: '20px' }}>
           <li>Find important emails that need attention</li>
           <li>Search emails by meaning (semantic search)</li>
-          <li>Query triage results by label, priority, date</li>
+          <li>Query priority results by label, priority, date</li>
           <li>Get email summaries and key points</li>
           <li>Continue previous conversations</li>
         </ul>

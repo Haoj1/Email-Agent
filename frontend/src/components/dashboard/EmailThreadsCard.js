@@ -6,8 +6,6 @@ export default function EmailThreadsCard({
   onRefreshEmails,
   onLoadMore,
   hasMore,
-  syncing,
-  onSyncInbox,
   emailThreads,
   onOpenThread,
   daysFilter,
@@ -20,7 +18,7 @@ export default function EmailThreadsCard({
   return (
     <div className="card" style={isStandalonePage ? { maxWidth: '100%', width: '100%' } : {}}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <h2>Email Threads</h2>
+      <h2>Conversations</h2>
         {!isStandalonePage && (
           <button 
             onClick={() => navigate('/threads')}
@@ -98,7 +96,7 @@ export default function EmailThreadsCard({
           {emailThreads.success ? (
             <div>
               <p>
-                ✓ Found {emailThreads.data.thread_count} threads (Total estimated:{' '}
+                ✓ Found {emailThreads.data.thread_count} conversations (Total estimated:{' '}
                 {emailThreads.data.total_estimated})
               </p>
 
@@ -146,7 +144,7 @@ export default function EmailThreadsCard({
                           </div>
                         )}
                         <div style={{ marginTop: '8px', fontSize: '0.8em', color: '#888' }}>
-                          {thread.message_count} message(s) in thread
+                          {thread.message_count} message(s) in conversation
                         </div>
                       </div>
                     ))}
@@ -165,7 +163,7 @@ export default function EmailThreadsCard({
                           padding: '8px 24px',
                         }}
                       >
-                        {loadingThreads ? 'Loading...' : 'Load More History'}
+                        {loadingThreads ? 'Loading...' : 'Load More'}
                       </button>
                     </div>
                   )}
