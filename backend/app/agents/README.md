@@ -1,22 +1,20 @@
 # Agents Module
 
-This module will contain LangGraph-based agents for:
-- Email triage and summarization
-- Thread chat agent
-- Draft generation
-- Calendar event extraction
+This directory contains the agent implementations used by the app:
 
-## Planned Structure
+## Implemented Agents
 
-```
-agents/
-├── __init__.py
-├── triage_agent.py      # Batch email triage agent
-├── thread_chat_agent.py # Cursor-style thread chat agent
-├── draft_agent.py       # Draft generation agent
-├── calendar_agent.py    # Calendar event extraction
-└── tools/               # Agent tools
-    ├── gmail_tools.py
-    ├── calendar_tools.py
-    └── datetime_tools.py
-```
+- **`triage_agent.py`**: batch triage + prioritization for Priority Inbox
+- **`thread_chat_agent.py`**: per-thread assistant (Thread Chat) used on the thread detail page
+- **`assist_chat_agent.py`**: global assistant (Inbox Copilot) with tools + RAG
+
+## Tools
+
+Located in `tools/`:
+- `gmail_tools.py`: Gmail thread retrieval, related-thread search, draft generation
+- `assist_chat_tools.py`: triage queries + RAG search + “important emails” convenience tool + multi-account Gmail tools
+- `datetime_tools.py`: current time tool for scheduling/deadline reasoning
+
+## Notes
+
+- Agents stream “thinking steps” and results to the frontend using SSE endpoints in `backend/app/routes/`.

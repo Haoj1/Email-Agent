@@ -52,6 +52,10 @@
   gap: 24px;
 }
 
+.dashboard-grid-span-full {
+  grid-column: 1 / -1;
+}
+
 .dashboard-content.full-width {
   display: block;
   max-width: 1200px;

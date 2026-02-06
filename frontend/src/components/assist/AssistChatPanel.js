@@ -263,7 +263,13 @@ function AssistChatPanel({ onClose, selectedEmail }) {
     { label: 'Need Attention', prompt: 'What emails need my attention?' },
   ];
 
-  const appHelpPrompt = 'What can this email agent app do? How do I use it?';
+  const appHelpPrompt =
+    'I’m new to this app. Please explain what it can do and how to use it, using the current UI names:\n\n' +
+    '- Inbox Copilot: what questions can I ask? what tools can it use?\n' +
+    '- Conversations: how do I browse threads and open a conversation?\n' +
+    '- Priority Inbox: what does “Update Priorities” do? how do filters work?\n' +
+    '- Suggested Schedule (Calendar): how do I generate suggestions, drag/resize blocks in week view, select/deselect, and Confirm & Create?\n\n' +
+    'Also include a short “typical workflow” example for a busy day.';
 
   const handleQuickAction = (prompt) => {
     setInput(prompt);
@@ -582,8 +588,6 @@ function AssistChatPanel({ onClose, selectedEmail }) {
             ) : (
               <>
                 {messages.map((msg, idx) => {
-                  const messageKey = `msg_${idx}_${msg.timestamp?.getTime() || idx}`;
-
                   return (
                     <div
                       key={idx}

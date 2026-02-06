@@ -3,6 +3,12 @@ import { api } from '../services/api';
 
 const EmailCacheContext = createContext();
 
+// Cache expiration time: 5 minutes
+const CACHE_EXPIRY_MS = 5 * 60 * 1000;
+
+// Pending-triage check cooldown: 5 minutes
+const CHECK_COOLDOWN_MS = 5 * 60 * 1000;
+
 export const useEmailCache = () => {
   const context = useContext(EmailCacheContext);
   if (!context) {
@@ -14,9 +20,6 @@ export const useEmailCache = () => {
 export const EmailCacheProvider = ({ children }) => {
   // Cache structure: { email: { threads: {...}, syncResult: {...}, timestamp: number } }
   const [cache, setCache] = useState({});
-  
-  // Cache expiration time: 5 minutes
-  const CACHE_EXPIRY = 5 * 60 * 1000;
   
   // Global pending triage state
   const [pendingTriageCount, setPendingTriageCount] = useState(0);
@@ -33,14 +36,13 @@ export const EmailCacheProvider = ({ children }) => {
   
   // Global cooldown mechanism - tracks last check time per email
   const lastCheckTimeRef = useRef({}); // { email: timestamp }
-  const CHECK_COOLDOWN = 5 * 60 * 1000; // 5 minutes in milliseconds
 
   const getCacheKey = (email) => email || 'default';
 
-  const isCacheValid = (timestamp) => {
+  const isCacheValid = useCallback((timestamp) => {
     if (!timestamp) return false;
-    return Date.now() - timestamp < CACHE_EXPIRY;
-  };
+    return Date.now() - timestamp < CACHE_EXPIRY_MS;
+  }, []);
 
   const getCachedThreads = useCallback((email = null) => {
     const key = getCacheKey(email);
@@ -50,7 +52,7 @@ export const EmailCacheProvider = ({ children }) => {
       return cached.threads;
     }
     return null;
-  }, [cache]);
+  }, [cache, isCacheValid]);
 
   const setCachedThreads = useCallback((email, threadsData) => {
     const key = getCacheKey(email);
@@ -72,7 +74,7 @@ export const EmailCacheProvider = ({ children }) => {
       return cached.syncResult;
     }
     return null;
-  }, [cache]);
+  }, [cache, isCacheValid]);
 
   const setCachedSyncResult = useCallback((email, syncData) => {
     const key = getCacheKey(email);
@@ -94,7 +96,7 @@ export const EmailCacheProvider = ({ children }) => {
       return cached.triageResults;
     }
     return null;
-  }, [cache]);
+  }, [cache, isCacheValid]);
 
   const setCachedTriageResults = useCallback((email, triageData) => {
     const key = getCacheKey(email);
@@ -136,7 +138,7 @@ export const EmailCacheProvider = ({ children }) => {
       });
       return newCache;
     });
-  }, []);
+  }, [isCacheValid]);
 
   // Global checkPendingTriage function with cooldown
   const checkPendingTriage = useCallback(async (email, force = false) => {
@@ -145,8 +147,8 @@ export const EmailCacheProvider = ({ children }) => {
     const lastCheck = lastCheckTimeRef.current[emailKey];
 
     // Check cooldown (unless forced)
-    if (!force && lastCheck && (now - lastCheck) < CHECK_COOLDOWN) {
-      const remainingMinutes = Math.ceil((CHECK_COOLDOWN - (now - lastCheck)) / 60000);
+    if (!force && lastCheck && (now - lastCheck) < CHECK_COOLDOWN_MS) {
+      const remainingMinutes = Math.ceil((CHECK_COOLDOWN_MS - (now - lastCheck)) / 60000);
       console.log(`Skipping pending triage check for ${emailKey} - cooldown active (${remainingMinutes} min remaining)`);
       return;
     }

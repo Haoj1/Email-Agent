@@ -71,34 +71,36 @@ class AssistChatAgent:
 This is a Multi-User AI Email Agent application that helps users manage their Gmail emails more effectively. Here are the main features:
 
 ### Core Features:
-1. **Email Triage Agent**: Automatically categorizes emails into NEEDS_REPLY, FYI, ARCHIVE, or SPAM_LIKE, and assigns priority scores (0-1)
-2. **Assist Chat Agent** (this agent): A general-purpose AI assistant that can:
-   - Find important emails using triage results
-   - Search emails semantically using RAG (Retrieval-Augmented Generation)
+1. **Priority Inbox**: Automatically categorizes emails (NEEDS_REPLY, FYI, ARCHIVE, SPAM_LIKE) and assigns priority scores (0–1). You can click **Update Priorities** to refresh.
+2. **Inbox Copilot** (this agent): A general-purpose AI assistant that can:
+   - Find important emails using Priority Inbox results
+   - Search emails semantically using RAG (Retrieval‑Augmented Generation)
    - Answer questions about emails
    - Help with email management tasks
-3. **Thread Chat Agent**: Interactive chat for specific email threads, can generate draft replies
-4. **Email Threads Page**: View and browse email threads with time-based filtering
-5. **Email Triage Page**: View triage results, filter by label/priority/date, and run triage analysis
-6. **Dashboard**: Overview of email accounts, threads, triage results, and quick actions
+3. **Thread Chat**: Interactive chat for a specific conversation, can generate draft replies
+4. **Conversations**: Browse email conversations with time-based filtering
+5. **Suggested Schedule (Calendar)**: Auto-plans follow‑ups from Priority Inbox into open time on your calendar (week view). Users can review, drag/resize, select items, then confirm to create calendar events.
+6. **Dashboard**: Overview of accounts, Conversations, Priority Inbox, Inbox Copilot, and Suggested Schedule
 
 ### How to Use:
-- **Dashboard**: Main page showing email accounts, recent threads, and triage results
-- **Email Threads**: Browse and view email threads, click on any thread to see details
-- **Email Triage Agent**: Run triage analysis to categorize emails, view results by priority/label
-- **Assist Chat**: Ask questions about emails, find important messages, search by topic
-- **Thread Chat**: Open any email thread and chat with AI about that specific thread, generate draft replies
+- **Dashboard**: Main page showing account selector + quick access to Conversations, Priority Inbox, Inbox Copilot, and Suggested Schedule
+- **Conversations**: Browse conversations, click one to open the full thread detail page
+- **Priority Inbox**: Review prioritized emails; use filters (Today/Last 3 Days/Week/Month); click **Update Priorities** to refresh results
+- **Inbox Copilot**: Ask questions like “What needs my attention today?” or “Find emails about deadlines”
+- **Thread Chat**: On a thread detail page, chat about that specific conversation and generate a draft reply
+- **Suggested Schedule**: Generate follow‑up blocks, use week view to drag/resize, click blocks to select/deselect, then **Confirm & Create** to add to Google Calendar
 
 ### Navigation:
-- Use the top navigation bar to switch between Dashboard, Email Threads, and Triage Agent
-- Click on any thread ID link to view the full email thread
+- Use the top navigation bar to switch between Dashboard, Conversations, and Priority Inbox
+- Click on any conversation / thread ID link to view the full thread
 - Use the email selector to switch between multiple Gmail accounts
 
 ### Common Questions:
-- "How do I find important emails?" → Use Assist Chat to query triage results or ask "What important emails do I need to reply to?"
-- "How do I run triage?" → Go to Email Triage Agent page and click "Run Triage"
+- "How do I find important emails?" → Use Inbox Copilot to query Priority Inbox results or ask "What important emails do I need to reply to?"
+- "How do I update priorities?" → Go to Priority Inbox and click "Update Priorities"
 - "How do I generate a draft reply?" → Open a thread detail page and use the Thread Chat feature
 - "How do I search emails by topic?" → Use Assist Chat and ask questions like "Find emails about deadlines"
+- "How do I auto-plan follow‑ups on my calendar?" → Go to Suggested Schedule on the Dashboard, generate suggestions, then Confirm & Create
 
 You have access to tools that allow you to:
 - Query email triage results to find important emails
@@ -370,9 +372,9 @@ Remember: You can help users find, understand, and manage their emails effective
                         if "results" in result:
                             for item in result.get("results", []):
                                 if "thread_id" in item:
-                                    citations.append(f"Thread {item['thread_id']}")
+                                    citations.append(f"Conversation {item['thread_id']}")
                                 if "label" in item and "priority" in item:
-                                    citations.append(f"Triage: {item['label']} (priority: {item['priority']:.2f})")
+                                    citations.append(f"Priority Inbox: {item['label']} (priority: {item['priority']:.2f})")
                     
                     # Add tool result to messages
                     messages.append(ToolMessage(

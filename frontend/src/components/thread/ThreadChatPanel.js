@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { api } from '../../services/api';
 import './ThreadChatPanel.css';
@@ -23,14 +23,14 @@ function ThreadChatPanel({ threadId, email, onClose }) {
     return [];
   };
 
-  const saveCachedMessages = (msgs) => {
+  const saveCachedMessages = useCallback((msgs) => {
     try {
       const cacheKey = `thread_chat_${threadId}`;
       localStorage.setItem(cacheKey, JSON.stringify(msgs));
     } catch (e) {
       console.error('Error saving cached messages:', e);
     }
-  };
+  }, [threadId]);
 
   const [messages, setMessages] = useState(getCachedMessages);
   const [input, setInput] = useState('');
@@ -58,7 +58,7 @@ function ThreadChatPanel({ threadId, email, onClose }) {
     if (messages.length > 0) {
       saveCachedMessages(messages);
     }
-  }, [messages, threadId]);
+  }, [messages, saveCachedMessages]);
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;
@@ -346,9 +346,9 @@ function ThreadChatPanel({ threadId, email, onClose }) {
           cleanBody = cleanBody.replace(/\{[^{}]*"action"[^{}]*\}/g, '');
           cleanBody = cleanBody.replace(/\{[^{}]*"tool"[^{}]*\}/g, '');
           // Remove common thinking patterns
-          cleanBody = cleanBody.replace(/I'll\s+[^\.]+\./gi, '');
-          cleanBody = cleanBody.replace(/Let me\s+[^\.]+\./gi, '');
-          cleanBody = cleanBody.replace(/First,?\s+[^\.]+\./gi, '');
+          cleanBody = cleanBody.replace(/I'll\s+[^.]+\./gi, '');
+          cleanBody = cleanBody.replace(/Let me\s+[^.]+\./gi, '');
+          cleanBody = cleanBody.replace(/First,?\s+[^.]+\./gi, '');
           // Remove markdown code blocks that might contain JSON
           cleanBody = cleanBody.replace(/```[\s\S]*?```/g, '');
           cleanBody = cleanBody.trim();

@@ -1,279 +1,194 @@
-# Multi-User AI Email Agent
+# Email Agent (Multi‑User AI Email Copilot)
 
-A multi-user AI Email Agent Web application based on Gmail + Google Calendar, with LangGraph implementation for email analysis, reply draft generation, calendar event extraction, a Cursor-style executable Thread Chat Agent, and a global Assist Chat Agent (similar to Google Gemini).
+Gmail + Google Calendar powered email workflow app with:
+- **Inbox Copilot**: global assistant with tool calling + RAG (semantic search)
+- **Conversations**: browse email threads with filters + pagination
+- **Priority Inbox**: triage labels + priority score + streaming run progress
+- **Suggested Schedule**: auto-plan follow‑ups onto your calendar (week grid) and confirm to create events
+
+## UI Pages (Frontend Names)
+
+- **Dashboard** (`/dashboard`): overview + quick actions + Suggested Schedule
+- **Conversations** (`/threads`): browse email conversations
+- **Priority Inbox** (`/triage`): view priority results + run “Update Priorities”
+- **Thread Detail** (`/thread/:threadId`): full thread + **Thread Chat** (draft replies, save to Gmail)
+- **Inbox Copilot**: slide‑in panel from Dashboard, with session history
+
+## Key Features
+
+- **Multi‑account support**: switch between multiple Gmail accounts
+- **Priority Inbox (Triage)**:
+  - Labels: `NEEDS_REPLY`, `FYI`, `ARCHIVE`, `SPAM_LIKE`
+  - Priority score \(0–1\), sorted by importance
+  - Time filters (Today / 3 / 5 / 7 / 30 days)
+  - Pending triage indicator + cooldown based refresh
+  - Streaming progress (SSE) and **shared progress state** across Dashboard + `/triage`
+- **Inbox Copilot (Assist Chat)**:
+  - Saves chat sessions to DB (`assist_chat_sessions`)
+  - Tool calling: triage query, RAG search, thread retrieval, draft generation
+  - Thread IDs in answers become clickable links in the UI
+  - “📖 How to Use This App” quick action
+- **Knowledge Base (RAG)**:
+  - Local embeddings using `all-MiniLM-L6-v2` (SentenceTransformers)
+  - Stored in Postgres + `pgvector` (`email_embeddings`)
+  - Background “silent sync & embed” task with cooldown to avoid repeated heavy work
+- **Suggested Schedule (Calendar)**:
+  - Generates follow‑up blocks from Priority Inbox and places them into free calendar time
+  - Week grid view (drag / resize / select) then **Confirm & Create** to write events to Google Calendar
 
 ## Project Structure
 
 ```
 Email-Agent/
-├── backend/              # FastAPI + Python backend
+├── backend/                         # FastAPI + Python
 │   ├── app/
-│   │   ├── config.py    # Configuration
-│   │   ├── routes/      # API routes
-│   │   ├── agents/      # LangGraph agents (to be implemented)
-│   │   └── services/    # Service layer (Gmail, Calendar)
-│   ├── main.py          # FastAPI application
-│   └── requirements.txt # Python dependencies
-├── frontend/            # React frontend
+│   │   ├── agents/                  # Assist/Thread/Triage agents + tools
+│   │   ├── routes/                  # FastAPI routes
+│   │   ├── services/                # Gmail/Calendar/RAG/Embedding/background tasks
+│   │   ├── models.py                # SQLAlchemy models
+│   │   └── database.py              # DB engine/session
+│   ├── init_database.py             # Create tables + add missing indexes (non-destructive)
+│   ├── main.py                      # FastAPI entry
+│   └── requirements.txt
+├── frontend/                        # React
 │   ├── src/
-│   │   ├── pages/       # Page components
-│   │   └── services/    # API services
-│   └── public/
-├── client_secret.json   # Google OAuth credentials (gitignored)
-└── prd.md              # Product requirements document
+│   │   ├── components/
+│   │   └── pages/
+│   └── package.json
+└── client_secret.json               # Google OAuth credentials (gitignored)
 ```
 
-## Setup Instructions
+## Setup (Local Development)
 
 ### Prerequisites
 
-- Python 3.10 or higher
-- Node.js (v18 or higher)
-- npm or yarn
-- Google Cloud Project with OAuth credentials
+- **Python** 3.10+
+- **Node.js** 18+
+- **PostgreSQL** 15+
+- **Google Cloud OAuth** credentials (Gmail + Calendar enabled)
 
-### Backend Setup (FastAPI + Python)
+### 1) Backend (FastAPI)
 
-1. Navigate to backend directory:
 ```bash
 cd backend
-```
-
-2. Create virtual environment:
-```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-4. Create `.env` file:
-```bash
-# Copy the example (if .env.example exists)
-cp .env.example .env
-```
+Create `backend/.env` (example):
 
-5. Update `.env` with your configuration:
 ```env
-PORT=5000
+PORT=5001
 DEBUG=True
 FRONTEND_URL=http://localhost:3000
-SESSION_SECRET=your-secret-key-change-in-production
+CORS_ORIGINS=http://localhost:3000
+SESSION_SECRET=change-me-in-production
+
+# Google OAuth
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=http://localhost:5001/api/auth/google/callback
+
+# Database
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+DATABASE_NAME=email_agent
+DATABASE_USER=postgres
+DATABASE_PASSWORD=...
+
+# LLM (choose one)
+LLM_PROVIDER=deepseek
+DEEPSEEK_API_KEY=...
+# or
+# LLM_PROVIDER=openai
+# OPENAI_API_KEY=...
 ```
 
-6. Ensure `client_secret.json` is in the project root with your Google OAuth credentials.
+Initialize DB (creates tables, enables `pgvector`, and adds missing indexes **without wiping data**):
 
-7. Start the server:
+```bash
+python init_database.py
+```
+
+Run backend:
+
 ```bash
 python main.py
 ```
 
-Or with uvicorn:
-```bash
-uvicorn main:app --reload --port 5000
-```
+Backend:
+- API base: `http://localhost:5001/api`
+- Docs: `http://localhost:5001/docs`
 
-The backend will run on `http://localhost:5000`
-API documentation: `http://localhost:5000/docs`
+### 2) Frontend (React)
 
-### Frontend Setup (React)
-
-1. Navigate to frontend directory:
 ```bash
 cd frontend
-```
-
-2. Install dependencies:
-```bash
 npm install
-```
-
-3. Create `.env` file:
-```bash
-# Copy the example (if .env.example exists)
-cp .env.example .env
-```
-
-4. Update `.env` if needed:
-```env
-REACT_APP_API_URL=http://localhost:5000/api
-```
-
-5. Start the development server:
-```bash
 npm start
 ```
 
-The frontend will run on `http://localhost:3000`
+Optional `frontend/.env`:
+
+```env
+REACT_APP_API_URL=http://localhost:5001/api
+```
+
+Frontend:
+- `http://localhost:3000`
 
 ## Google OAuth Setup
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select an existing one
-3. Enable Gmail API and Calendar API
-4. Create OAuth 2.0 credentials (Web application)
-5. Add authorized redirect URI: `http://localhost:5000/api/auth/google/callback`
-6. Download credentials and save as `client_secret.json` in the project root
+In Google Cloud Console:
+- Enable **Gmail API** + **Google Calendar API**
+- Create OAuth “Web application”
+- Add redirect URI: `http://localhost:5001/api/auth/google/callback`
 
-### Required OAuth Scopes
-
+Scopes used (see `backend/app/config.py`):
+- `openid`
+- `https://www.googleapis.com/auth/userinfo.email`
+- `https://www.googleapis.com/auth/userinfo.profile`
 - `https://www.googleapis.com/auth/gmail.readonly`
 - `https://www.googleapis.com/auth/gmail.compose`
 - `https://www.googleapis.com/auth/calendar.events`
 
-## Current Features
+## Main API Endpoints (Backend)
 
-- ✅ Google OAuth authentication (FastAPI)
-- ✅ Gmail API access test
-- ✅ Calendar API access test
-- ✅ Session management
-- ✅ Multi-user support (session-based)
-- ✅ LangGraph dependencies installed
-- ✅ Service layer structure (Gmail, Calendar)
-- ✅ Email display with details (subject, from, date, snippet)
-
-## Database Setup
-
-### Local PostgreSQL (Recommended for Development)
-
-For local development, use a local PostgreSQL database (free and fast):
-
-1. **Install PostgreSQL** (macOS):
-   ```bash
-   brew install postgresql@15
-   brew services start postgresql@15
-   ```
-
-2. **Create database**:
-   ```bash
-   createdb email_agent
-   ```
-
-3. **Configure `.env`** in `backend/` directory:
-   ```env
-   DATABASE_HOST=localhost
-   DATABASE_PORT=5432
-   DATABASE_NAME=email_agent
-   DATABASE_USER=postgres
-   DATABASE_PASSWORD=your_password
-   ```
-
-4. **Install dependencies and test**:
-   ```bash
-   cd backend
-   pip install -r requirements.txt
-   python test_db_connection.py
-   ```
-
-5. **Initialize database**:
-   ```bash
-   python init_database.py
-   ```
-
-📖 **Detailed guide**: See [backend/LOCAL_DATABASE_SETUP.md](./backend/LOCAL_DATABASE_SETUP.md)
-
-### GCP Cloud SQL (For Production)
-
-For production deployment, use GCP Cloud SQL:
-📖 See [backend/GCP_DATABASE_SETUP.md](./backend/GCP_DATABASE_SETUP.md)
-
-## Next Steps
-
-- [x] Database setup (PostgreSQL) - Use local for development
-- [ ] Token storage in database
-- [ ] LangGraph agent implementation
-  - [ ] Email triage agent
-  - [ ] Thread chat agent
-  - [ ] Assist chat agent (global AI assistant)
-  - [ ] Draft generation agent
-  - [ ] Calendar event extraction
-- [ ] Inbox sync functionality
-- [ ] Gmail service implementation
-- [ ] Calendar service implementation
-
-## API Endpoints
-
-### Authentication
-- `GET /api/auth/google/login` - Initiate Google OAuth login
-- `GET /api/auth/google/callback` - OAuth callback handler
-- `GET /api/auth/me` - Get current authenticated user
-- `POST /api/auth/logout` - Logout current user
-
-### Testing
-- `GET /api/auth/test/gmail` - Test Gmail API access
-- `GET /api/auth/test/calendar` - Test Calendar API access
+### Auth
+- `GET /api/auth/google/login`
+- `GET /api/auth/google/callback`
+- `GET /api/auth/me`
+- `POST /api/auth/logout`
 
 ### Gmail
-- `POST /api/gmail/sync` - Sync inbox (to be implemented)
-- `GET /api/threads/{thread_id}` - Get email thread (to be implemented)
+- `GET /api/gmail/threads` (supports pagination via `page_token`)
+- `GET /api/gmail/threads/{thread_id}`
 
-### Thread Chat Agent
-- `POST /api/chat/thread` - Thread Chat Agent conversation (to be implemented)
-- `POST /api/chat/confirm` - Confirm and execute action (to be implemented)
+### Priority Inbox (Triage)
+- `POST /api/triage/run` (SSE stream)
+- `GET /api/triage/results` (supports `days`, `limit`, `skip`)
+- `GET /api/triage/stats` (pending count)
 
-### Assist Chat Agent
-- `POST /api/chat/assist` - Assist Chat Agent conversation (to be implemented)
-- `POST /api/chat/assist/confirm` - Confirm and execute action (to be implemented)
-- `GET /api/chat/assist/history` - Get conversation history (to be implemented)
+### Thread Chat
+- `POST /api/thread-chat/ask` (SSE stream)
+- `POST /api/thread-chat/save-draft` (saves to Gmail; auto-detects correct account)
 
-### Calendar
-- `POST /api/calendar/events` - Create calendar event (to be implemented)
+### Inbox Copilot (Assist Chat)
+- `POST /api/assist-chat/ask` (SSE stream)
+- `GET /api/assist-chat/sessions`
+- `GET /api/assist-chat/sessions/{session_id}`
+- `DELETE /api/assist-chat/sessions/{session_id}`
 
-### Drafts
-- `POST /api/drafts/save` - Save email draft (to be implemented)
+### Suggested Schedule (Calendar)
+- `GET /api/calendar/suggestions`
+- `POST /api/calendar/confirm`
 
-### Health
-- `GET /api/health` - Health check endpoint
+## Production Notes
 
-## Technology Stack
-
-### Backend
-- **FastAPI** - Modern Python web framework
-- **Google APIs** - Gmail and Calendar integration
-- **LangGraph** - Agent orchestration framework
-- **LangChain** - LLM framework
-- **Pydantic** - Data validation
-
-### Frontend
-- **React** - UI framework
-- **React Router** - Routing
-- **Axios** - HTTP client
-
-## Security Notes
-
-- Never commit `client_secret.json` or `.env` files
-- Use strong `SESSION_SECRET` in production
-- Enable HTTPS in production
-- All write operations require user confirmation (human-in-the-loop)
-- OAuth tokens are stored securely (currently in-memory, will be in database)
-
-## Development
-
-### Backend Development
-
-The backend uses FastAPI with automatic API documentation:
-- Swagger UI: `http://localhost:5000/docs`
-- ReDoc: `http://localhost:5000/redoc`
-
-### Adding New Routes
-
-1. Create route file in `app/routes/`
-2. Import and include in `main.py`
-
-### Adding LangGraph Agents
-
-1. Create agent file in `app/agents/`
-2. Implement using LangGraph framework
-3. Add routes in `app/routes/` to expose agent endpoints
-
-#### Agent Types
-
-- **Thread Chat Agent**: Context-aware agent for specific email threads
-- **Assist Chat Agent**: Global AI assistant (similar to Gemini) that can be opened anywhere in the app
-
-## License
-
-ISC
+- Set `DEBUG=False`
+- Use a strong `SESSION_SECRET`
+- Set `FRONTEND_URL` + `CORS_ORIGINS` to your deployed frontend origin(s)
+- Update `GOOGLE_REDIRECT_URI` to your deployed backend callback URL and update OAuth redirect URIs in Google Cloud
+- Use a managed Postgres (e.g. Cloud SQL / RDS) and ensure `pgvector` is available
+- Use HTTPS in production

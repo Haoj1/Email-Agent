@@ -23,16 +23,16 @@ function AppContent() {
       return null;
     }
   });
-  
+
   // Component to conditionally show Navigation
   function ConditionalNavigation({ user, selectedEmail, onSelectEmail, onLogout }) {
     const location = useLocation();
     const isThreadDetail = location.pathname.startsWith('/thread/');
-    
+
     if (isThreadDetail) {
       return null; // Don't show Navigation on ThreadDetail pages
     }
-    
+
     return (
       <Navigation
         user={user}
@@ -105,25 +105,32 @@ function AppContent() {
                       <Route
                         path="/dashboard"
                         element={
-                          <Dashboard 
-                            user={user} 
-                            selectedEmail={selectedEmail} 
-                            onSelectEmail={handleSelectEmail} 
+                          <Dashboard
+                            user={user}
+                            selectedEmail={selectedEmail}
+                            onSelectEmail={handleSelectEmail}
                             onLogout={handleLogout}
                           />
                         }
                       />
                       <Route
                         path="/threads"
-                        element={<EmailThreadsPage user={user} selectedEmail={selectedEmail} onSelectEmail={handleSelectEmail} onLogout={handleLogout} />}
+                        element={
+                          <EmailThreadsPage
+                            user={user}
+                            selectedEmail={selectedEmail}
+                            onSelectEmail={handleSelectEmail}
+                            onLogout={handleLogout}
+                          />
+                        }
                       />
                       <Route
                         path="/triage"
                         element={
-                          <EmailTriagePage 
-                            user={user} 
-                            selectedEmail={selectedEmail} 
-                            onSelectEmail={handleSelectEmail} 
+                          <EmailTriagePage
+                            user={user}
+                            selectedEmail={selectedEmail}
+                            onSelectEmail={handleSelectEmail}
                             onLogout={handleLogout}
                           />
                         }

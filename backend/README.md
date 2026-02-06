@@ -1,104 +1,48 @@
-# Email Agent Backend
+# Email Agent Backend (FastAPI)
 
-FastAPI backend for Multi-User AI Email Agent with LangGraph integration.
+FastAPI backend for the Email Agent app. Provides:
+- OAuth + multi-user session auth
+- Gmail threads + thread detail
+- Priority Inbox (triage) with streaming SSE progress
+- Thread Chat (SSE) + save draft to Gmail (multi-account safe)
+- Inbox Copilot (Assist Chat) with session persistence + tools + RAG
+- Suggested Schedule (Calendar): generate suggestions + confirm to create events
 
-## Setup
+## Quickstart
 
-### Prerequisites
-
-- Python 3.10 or higher
-- pip or poetry
-
-### Installation
-
-1. Create a virtual environment:
 ```bash
+cd backend
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-2. Install dependencies:
-```bash
+source venv/bin/activate
 pip install -r requirements.txt
-```
-
-3. Create `.env` file (copy from `.env.example`):
-```bash
-cp .env.example .env
-```
-
-4. Update `.env` with your configuration:
-```env
-PORT=5000
-DEBUG=True
-FRONTEND_URL=http://localhost:3000
-SESSION_SECRET=your-secret-key-change-in-production
-```
-
-5. Ensure `client_secret.json` is in the project root with your Google OAuth credentials.
-
-### Running the Server
-
-Development mode (with auto-reload):
-```bash
+python init_database.py
 python main.py
 ```
 
-Or using uvicorn directly:
-```bash
-uvicorn main:app --reload --port 5000
-```
+Default:
+- API base: `http://localhost:5001/api`
+- Docs: `http://localhost:5001/docs`
 
-The API will be available at `http://localhost:5000`
+## Key Routes
 
-API documentation (Swagger UI) will be available at `http://localhost:5000/docs`
-
-## Project Structure
-
-```
-backend/
-├── app/
-│   ├── __init__.py
-│   ├── config.py           # Configuration settings
-│   ├── routes/             # API routes
-│   │   ├── auth.py         # OAuth routes
-│   │   └── health.py       # Health check
-│   ├── agents/             # LangGraph agents (to be implemented)
-│   └── services/           # Service layer
-│       ├── gmail_service.py
-│       └── calendar_service.py
-├── main.py                 # FastAPI application entry point
-├── requirements.txt        # Python dependencies
-└── .env.example           # Environment variables template
-```
-
-## API Endpoints
-
-### Authentication
-- `GET /api/auth/google/login` - Initiate Google OAuth login
-- `GET /api/auth/google/callback` - OAuth callback handler
-- `GET /api/auth/me` - Get current authenticated user
-- `POST /api/auth/logout` - Logout current user
-
-### Testing
-- `GET /api/auth/test/gmail` - Test Gmail API access
-- `GET /api/auth/test/calendar` - Test Calendar API access
-
-### Health
-- `GET /api/health` - Health check endpoint
-
-## Next Steps
-
-- [ ] Database setup (PostgreSQL)
-- [ ] Token storage in database
-- [ ] LangGraph agent implementation
-- [ ] Gmail service implementation
-- [ ] Calendar service implementation
-- [ ] Thread chat agent
-- [ ] Email triage agent
-
-## Development Notes
-
-- Session storage is currently in-memory (will be replaced with database)
-- OAuth tokens are stored in session (will be persisted to database)
-- LangGraph agents will be implemented in `app/agents/` directory
+- **Auth**
+  - `GET /api/auth/google/login`
+  - `GET /api/auth/google/callback`
+  - `GET /api/auth/me`
+  - `POST /api/auth/logout`
+- **Gmail**
+  - `GET /api/gmail/threads`
+  - `GET /api/gmail/threads/{thread_id}`
+- **Priority Inbox (Triage)**
+  - `POST /api/triage/run` (SSE)
+  - `GET /api/triage/results`
+  - `GET /api/triage/stats`
+- **Thread Chat**
+  - `POST /api/thread-chat/ask` (SSE)
+  - `POST /api/thread-chat/save-draft`
+- **Inbox Copilot (Assist Chat)**
+  - `POST /api/assist-chat/ask` (SSE)
+  - `GET /api/assist-chat/sessions`
+- **Calendar**
+  - `GET /api/calendar/suggestions`
+  - `POST /api/calendar/confirm`

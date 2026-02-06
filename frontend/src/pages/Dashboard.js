@@ -6,6 +6,7 @@ import EmailAccountsCard from '../components/dashboard/EmailAccountsCard';
 import AssistChatCard from '../components/dashboard/AssistChatCard';
 import EmailThreadsCard from '../components/dashboard/EmailThreadsCard';
 import EmailTriageCard from '../components/dashboard/EmailTriageCard';
+import SuggestedScheduleCard from '../components/dashboard/SuggestedScheduleCard';
 import AssistChatPanel from '../components/assist/AssistChatPanel';
 import './Dashboard.css';
 
@@ -324,6 +325,10 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
           onLoadMore={() => loadTriageResults(null, false, false, true)}
           onOpenThread={handleOpenThread}
         />
+
+        <div className="dashboard-grid-span-full">
+          <SuggestedScheduleCard selectedEmail={selectedEmail} />
+        </div>
       </div>
       <div className={`thread-chat-wrapper ${showAssistChat ? 'open' : ''}`}>
         <AssistChatPanel
