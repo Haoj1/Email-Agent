@@ -27,3 +27,6 @@ greenlet>=3.0.0  # Required for psycopg async operations
 # Option 3: asyncpg (if you downgrade to Python 3.12 or wait for update)
 # asyncpg==0.29.0
 alembic==1.12.1
+# RAG and embeddings (required for Inbox Copilot semantic search)
+pgvector>=0.2.0
+sentence-transformers>=2.2.0
