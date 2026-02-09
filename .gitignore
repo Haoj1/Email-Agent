@@ -9,6 +9,7 @@ client_secret.json
 .env.local
 .env.*.local
 .env.*.backup
+/etc
 
 # Python
 __pycache__/
