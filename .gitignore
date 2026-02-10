@@ -127,3 +127,6 @@ backend/RAG_SETUP.md
 backend/LOCAL_DATABASE_SETUP.md
 prd.md
 TESTING_GUIDE.md
+frontend/.env.example
+frontend/.env.production
+frontend/package-lock.json
