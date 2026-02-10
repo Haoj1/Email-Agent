@@ -7,7 +7,7 @@ Gmail + Google Calendar powered email workflow app with:
 - **Suggested Schedule**: auto-plan follow‑ups onto your calendar (week grid) and confirm to create events
 
 > **Demo (personal deployment)**  
-> Live frontend: https://app.mail-agents.net/  
+> Live web: https://app.mail-agents.net/  
 > This is a personal deployment for demo purposes. For real email accounts and sensitive data, you are strongly encouraged to self‑host this project with your own Google account and database.
 
 ![Email Agent Dashboard](assets/demo-dashboard.png)
@@ -224,3 +224,15 @@ Scopes used (see `backend/app/config.py`):
 - **Regularly rotate** OAuth tokens and API keys
 - **Monitor access logs** for suspicious activity
 - **Keep dependencies updated** to patch security vulnerabilities
+
+## Contact
+
+- **Author**: Haoji Bian
+- **Email**: [haoji.bian@mail-agents.net](mailto:haoji.bian@mail-agents.net)
+- **Website**: https://mail-agents.net
+- **GitHub**: https://github.com/Haoj1/Email-Agent
+
+## License
+
+This project is licensed under the **MIT License**.  
+Copyright (c) 2026 Haoji Bian
