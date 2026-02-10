@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import logo from '../../assets/logo.png';
 
 export default function Navigation({
   user,
@@ -37,7 +38,20 @@ export default function Navigation({
       marginBottom: '20px'
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-        <h1 style={{ margin: 0, fontSize: '1.5rem' }}>Email Agent</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <img 
+            src={logo} 
+            alt="Email Agent Logo" 
+            style={{ 
+              width: '40px', 
+              height: '40px', 
+              objectFit: 'contain',
+              cursor: 'pointer'
+            }}
+            onClick={() => navigate('/dashboard')}
+          />
+          <h1 style={{ margin: 0, fontSize: '1.5rem' }}>Email Agent</h1>
+        </div>
         <div className="user-info" style={{ margin: 0, padding: 0, background: 'none', boxShadow: 'none', border: 'none' }}>
           <div style={{ textAlign: 'right' }}>
             <span style={{ fontSize: '0.9em' }}>

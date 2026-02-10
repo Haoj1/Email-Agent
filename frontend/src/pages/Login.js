@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
+import logo from '../assets/logo.png';
 import './Login.css';
 
 function Login() {
@@ -48,6 +49,17 @@ function Login() {
   return (
     <div className="login-container">
       <div className="login-card">
+        <img 
+          src={logo} 
+          alt="Email Agent Logo" 
+          style={{ 
+            width: '80px', 
+            height: '80px', 
+            objectFit: 'contain',
+            margin: '0 auto 16px auto',
+            display: 'block'
+          }}
+        />
         <h1>Email Agent</h1>
         <p className="subtitle">AI-powered email management with Gmail and Calendar</p>
         
