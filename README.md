@@ -7,8 +7,8 @@ Gmail + Google Calendar powered email workflow app with:
 - **Suggested Schedule**: auto-plan follow‑ups onto your calendar (week grid) and confirm to create events
 
 > **Demo (personal deployment)**  
-> Frontend (read‑only showcase): https://app.mail-agents.net/  
-> For privacy and security, you are strongly encouraged to self‑host this project with your own Google account and database.
+> Live frontend: https://app.mail-agents.net/  
+> This is a personal deployment for demo purposes. For real email accounts and sensitive data, you are strongly encouraged to self‑host this project with your own Google account and database.
 
 ![Email Agent Dashboard](assets/demo-dashboard.png)
 
