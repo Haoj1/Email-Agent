@@ -6,6 +6,12 @@ Gmail + Google Calendar powered email workflow app with:
 - **Priority Inbox**: triage labels + priority score + streaming run progress
 - **Suggested Schedule**: auto-plan follow‑ups onto your calendar (week grid) and confirm to create events
 
+> **Demo (personal deployment)**  
+> Frontend (read‑only showcase): https://app.mail-agents.net/  
+> For privacy and security, you are strongly encouraged to self‑host this project with your own Google account and database.
+
+![Email Agent Dashboard](assets/demo-dashboard.png)
+
 ## UI Pages (Frontend Names)
 
 - **Dashboard** (`/dashboard`): overview + quick actions + Suggested Schedule
@@ -35,6 +41,26 @@ Gmail + Google Calendar powered email workflow app with:
 - **Suggested Schedule (Calendar)**:
   - Generates follow‑up blocks from Priority Inbox and places them into free calendar time
   - Week grid view (drag / resize / select) then **Confirm & Create** to write events to Google Calendar
+
+## ⚠️ Security Notice: Self-Hosting Recommended
+
+**Important**: This application processes sensitive email data, including message content, metadata, and calendar information. To protect your privacy and prevent data leakage:
+
+- **Self-host this application** on your own infrastructure (AWS, GCP, Azure, or your own servers)
+- **Do not use third-party hosted instances** unless you fully trust the operator
+- **Review and understand** what data is stored and how it's processed
+- **Use strong authentication** and keep your deployment secure
+- **Regularly update** dependencies and monitor security advisories
+
+By self-hosting, you maintain full control over:
+- Email data storage and processing
+- Database access and encryption
+- API keys and OAuth tokens
+- Network security and access controls
+
+See deployment guides:
+- Backend: See `backend/README.md` for production deployment steps
+- Frontend: See `DEPLOY_FRONTEND.md` for S3 + CloudFront deployment
 
 ## Project Structure
 
@@ -186,9 +212,15 @@ Scopes used (see `backend/app/config.py`):
 
 ## Production Notes
 
-- Set `DEBUG=False`
-- Use a strong `SESSION_SECRET`
+**Security Best Practices**:
+- **Self-host on your own infrastructure** to maintain control over sensitive email data
+- Set `DEBUG=False` in production
+- Use a strong, randomly generated `SESSION_SECRET`
 - Set `FRONTEND_URL` + `CORS_ORIGINS` to your deployed frontend origin(s)
 - Update `GOOGLE_REDIRECT_URI` to your deployed backend callback URL and update OAuth redirect URIs in Google Cloud
-- Use a managed Postgres (e.g. Cloud SQL / RDS) and ensure `pgvector` is available
-- Use HTTPS in production
+- Use a managed Postgres (e.g. Cloud SQL / RDS) with encryption at rest and ensure `pgvector` is available
+- **Enable HTTPS** in production (required for OAuth)
+- **Restrict database access** to only the application server
+- **Regularly rotate** OAuth tokens and API keys
+- **Monitor access logs** for suspicious activity
+- **Keep dependencies updated** to patch security vulnerabilities

@@ -330,6 +330,37 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
           <SuggestedScheduleCard selectedEmail={selectedEmail} />
         </div>
       </div>
+      <footer className="dashboard-footer">
+        <div className="footer-content">
+          <div className="footer-section">
+            <h4>Email Agent</h4>
+            <p>AI-powered email management with Gmail and Calendar</p>
+          </div>
+          <div className="footer-section">
+            <h4>Contact</h4>
+            <p>
+              <a href="mailto:haoji.bian@mail-agents.net">haoji.bian@mail-agents.net</a>
+            </p>
+          </div>
+          <div className="footer-section">
+            <h4>Links</h4>
+            <p>
+              <a href="https://github.com/Haoj1/Email-Agent" target="_blank" rel="noopener noreferrer">
+                GitHub Repository
+              </a>
+            </p>
+            <p>
+              <a href="/privacy">Privacy Policy</a>
+            </p>
+            <p>
+              <a href="/terms">Terms of Service</a>
+            </p>
+          </div>
+        </div>
+        <div className="footer-bottom">
+          <p>&copy; {new Date().getFullYear()} Email Agent. All rights reserved.</p>
+        </div>
+      </footer>
       <div className={`thread-chat-wrapper ${showAssistChat ? 'open' : ''}`}>
         <AssistChatPanel
           onClose={() => setShowAssistChat(false)}

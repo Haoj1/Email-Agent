@@ -104,3 +104,26 @@
   font-style: italic;
   margin: 0;
 }
+
+.login-footer {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.login-footer p {
+  font-size: 13px;
+  color: #666;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.login-footer .footer-link {
+  color: #4285f4;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.login-footer .footer-link:hover {
+  text-decoration: underline;
+}

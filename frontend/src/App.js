@@ -9,6 +9,8 @@ import Dashboard from './pages/Dashboard';
 import EmailThreadsPage from './pages/EmailThreads';
 import EmailTriagePage from './pages/EmailTriage';
 import ThreadDetail from './pages/ThreadDetail';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import TermsOfService from './pages/TermsOfService';
 import './App.css';
 
 // Inner component that has access to EmailCache context
@@ -89,6 +91,8 @@ function AppContent() {
         <Routes>
           <Route path="/" element={<Login />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/terms" element={<TermsOfService />} />
           {user ? (
             <Route
               path="*"

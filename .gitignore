@@ -130,3 +130,4 @@ TESTING_GUIDE.md
 frontend/.env.example
 frontend/.env.production
 frontend/package-lock.json
+frontend/.env.local.example

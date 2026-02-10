@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../services/api';
 import logo from '../assets/logo.png';
 import './Login.css';
@@ -93,6 +93,15 @@ function Login() {
             <li>Access Google Calendar events</li>
           </ul>
           <p className="note">We will never send emails without your confirmation.</p>
+        </div>
+
+        <div className="login-footer">
+          <p>
+            By signing in, you agree to our{' '}
+            <Link to="/terms" className="footer-link">Terms of Service</Link>
+            {' '}and{' '}
+            <Link to="/privacy" className="footer-link">Privacy Policy</Link>.
+          </p>
         </div>
       </div>
     </div>
