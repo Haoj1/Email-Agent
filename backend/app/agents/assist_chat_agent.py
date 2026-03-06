@@ -10,7 +10,8 @@ from app.agents.tools.assist_chat_tools import (
     create_assist_chat_tools,
     execute_query_triage_results,
     execute_search_emails_rag,
-    execute_get_important_emails
+    execute_get_important_emails,
+    execute_web_search,
 )
 from app.agents.tools.datetime_tools import get_current_time_tool
 from app.services.gmail_service import GmailService
@@ -108,6 +109,7 @@ You have access to tools that allow you to:
 - Get email thread details
 - Find related threads
 - Generate draft email replies
+- Search the web for current information (when relevant to the user's question but not in their emails)
 
 ## Your Capabilities:
 1. **Find important emails**: Use query_triage_results or get_important_emails to find emails that need attention
@@ -115,11 +117,13 @@ You have access to tools that allow you to:
 3. **Answer questions** about emails (summarize, extract action items, deadlines, key points)
 4. **Generate draft replies** based on thread context
 5. **Help with email management**: Find emails by label, priority, date range, etc.
+6. **Look up current information**: Use web_search only when the user asks about topics outside their inbox (e.g. company news, definitions, recent events). Do NOT use web_search to find emails—use search_emails_rag or query_triage_results for that.
 
 ## Available Tools:
 - **query_triage_results**: Query triage results by label, priority, date range
 - **search_emails_rag**: Semantic search for emails (finds emails by meaning, not just keywords)
 - **get_important_emails**: Get high-priority emails that need attention (convenience function)
+- **web_search**: Search the web for current information (company info, news, definitions). Use only when the answer is not in the user's emails.
 - **get_thread**: Get full details of a specific thread (if Gmail service available)
 - **batch_get_threads**: Get multiple threads at once (if Gmail service available)
 - **search_related_threads**: Find threads from same sender/domain/subject (if Gmail service available)
@@ -134,6 +138,7 @@ You have access to tools that allow you to:
 - When user asks about "important emails" or "emails that need attention", use get_important_emails or query_triage_results with label="NEEDS_REPLY"
 - When user asks to find emails by topic/meaning, use search_emails_rag
 - When user asks about specific emails, use query_triage_results or get_thread
+- When user asks about something outside their emails (e.g. "what is X?", "latest news about Y", "company Z"), use web_search
 - For long threads, use extract_relevant_context to focus on relevant parts
 - When generating draft replies, be concise, professional, and address all questions/requests
 - Cite specific sources when referencing content (e.g., "According to triage result for thread X...")
@@ -174,6 +179,12 @@ Remember: You can help users find, understand, and manage their emails effective
             if result.get("success"):
                 count = result.get("count", 0)
                 return f"Found {count} important email(s)"
+            return f"Failed: {result.get('error', 'Unknown error')}"
+        
+        elif tool_name == "web_search":
+            if result.get("success"):
+                count = result.get("count", 0)
+                return f"Found {count} web result(s)"
             return f"Failed: {result.get('error', 'Unknown error')}"
         
         elif tool_name == "get_thread":
@@ -322,6 +333,8 @@ Remember: You can help users find, understand, and manage their emails effective
                                 user_id=self.user_id,
                                 **tool_args
                             )
+                        elif tool_name == "web_search":
+                            result = await execute_web_search(**tool_args)
                         else:
                             # Find the tool for synchronous execution
                             tool_func = None

@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     # LLM Provider Selection
     LLM_PROVIDER: str = "deepseek"  # "deepseek" or "openai"
     
+    # Web search (free DuckDuckGo via ddgs; no API key)
+    ENABLE_WEB_SEARCH: bool = True  # Set False to disable web search tool in Inbox Copilot
+    WEB_SEARCH_MAX_RESULTS: int = 5  # Max results per query
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

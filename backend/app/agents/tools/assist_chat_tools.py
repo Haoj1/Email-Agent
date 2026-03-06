@@ -1,7 +1,8 @@
 """
 Assist Chat Tools - Tools for the Assist Chat Agent
-Includes RAG search, triage query, and other email-related tools
+Includes RAG search, triage query, web search, and other email-related tools
 """
+import asyncio
 from typing import Optional, List, Dict, Any, Tuple
 from langchain_core.tools import tool
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +11,7 @@ from datetime import datetime, timedelta
 from app.models import TriageResult, EmailEmbedding
 from app.services.rag_service import RAGSearchService
 from app.services.gmail_service import GmailService
+from app.config import settings
 
 
 def create_assist_chat_tools(
@@ -146,12 +148,39 @@ def create_assist_chat_tools(
                 "error": str(e)
             }
     
+    @tool
+    def web_search(query: str, max_results: int = 5) -> Dict[str, Any]:
+        """
+        Search the web for current information. Use when the user asks about topics outside their emails (e.g. company info, news, definitions, recent events).
+        Do not use for finding emails—use search_emails_rag or query_triage_results instead.
+        
+        Args:
+            query: Search query (e.g. "Company X latest news", "what is API")
+            max_results: Maximum number of results to return (default: 5, max 10)
+        
+        Returns:
+            Dictionary with list of search results (title, link, snippet) or error.
+        """
+        if not getattr(settings, "ENABLE_WEB_SEARCH", True):
+            return {"success": False, "error": "Web search is disabled"}
+        try:
+            max_results = min(max_results, getattr(settings, "WEB_SEARCH_MAX_RESULTS", 10) or 10)
+            return {
+                "success": True,
+                "message": "Searching the web...",
+                "params": {"query": query, "max_results": max_results},
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
     # Add Gmail tools if gmail services are available
     tools = [
         query_triage_results,
         search_emails_rag,
         get_important_emails,
     ]
+    if getattr(settings, "ENABLE_WEB_SEARCH", True):
+        tools.append(web_search)
     
     # For backward compatibility
     if gmail_service and not primary_gmail_service:
@@ -520,3 +549,39 @@ async def execute_get_important_emails(
             "success": False,
             "error": str(e)
         }
+
+
+def _run_web_search_sync(query: str, max_results: int) -> Dict[str, Any]:
+    """Synchronous web search using DuckDuckGo (free, no API key). Run in executor to avoid blocking."""
+    try:
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS  # fallback if old package name still installed
+        results = []
+        ddgs = DDGS()
+        # .text() returns list of dicts with title, href, body (ddgs) or generator (duckduckgo_search)
+        raw = ddgs.text(query, max_results=max_results)
+        if hasattr(raw, "__iter__") and not isinstance(raw, (list, tuple)):
+            raw = list(raw)
+        for r in raw or []:
+            if not isinstance(r, dict):
+                continue
+            results.append({
+                "title": r.get("title", ""),
+                "link": r.get("href", r.get("link", "")),
+                "snippet": r.get("body", r.get("snippet", "")),
+            })
+        return {"success": True, "count": len(results), "results": results}
+    except Exception as e:
+        return {"success": False, "error": str(e), "results": []}
+
+
+async def execute_web_search(query: str, max_results: int = 5) -> Dict[str, Any]:
+    """Execute web_search tool asynchronously (runs DuckDuckGo in thread pool)."""
+    max_results = min(max_results, getattr(settings, "WEB_SEARCH_MAX_RESULTS", 10) or 10)
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: _run_web_search_sync(query, max_results),
+    )

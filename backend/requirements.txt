@@ -30,3 +30,5 @@ alembic==1.12.1
 # RAG and embeddings (required for Inbox Copilot semantic search)
 pgvector>=0.2.0
 sentence-transformers>=2.2.0
+# Web search (free, no API key; used by Inbox Copilot when ENABLE_WEB_SEARCH=True)
+ddgs>=3.0.0

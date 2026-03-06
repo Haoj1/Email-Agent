@@ -61,12 +61,15 @@ function AssistChatPanel({ onClose, selectedEmail }) {
           // Process content to add thread ID links
           const processedContent = processThreadIds(msg.content, threadIds);
           
+          const toolCalls = msg.tool_calls || [];
+          const usedWebSearch = msg.used_web_search === true || toolCalls.some((t) => (t.tool || t.name) === 'web_search');
           return {
             role: msg.role,
             content: processedContent,
             timestamp: new Date(msg.timestamp || Date.now()),
-            tool_calls: msg.tool_calls || [],
+            tool_calls: toolCalls,
             citations: msg.citations || [],
+            used_web_search: usedWebSearch,
           };
         });
         setMessages(processedMessages);
@@ -177,6 +180,7 @@ function AssistChatPanel({ onClose, selectedEmail }) {
             citations: finalResult.citations || [],
             tool_calls: finalResult.tool_calls || [],
             thinking_steps: finalResult.thinking_steps || [],
+            used_web_search: !!finalResult.used_web_search,
             timestamp: new Date(),
           };
           setMessages((prev) => [...prev, assistantMessage]);
@@ -610,6 +614,11 @@ function AssistChatPanel({ onClose, selectedEmail }) {
                         {msg.citations && msg.citations.length > 0 && (
                           <div className="message-citations">
                             <strong>References:</strong> {msg.citations.join(', ')}
+                          </div>
+                        )}
+                        {msg.used_web_search && (
+                          <div className="message-web-search-badge" title="This reply used web search for current information.">
+                            本条用到了联网搜索
                           </div>
                         )}
                       </div>

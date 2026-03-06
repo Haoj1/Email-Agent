@@ -176,12 +176,19 @@ async def stream_chat_response(
         # Stream final result
         result = agent_result['result']
         if result:
+            tool_calls = result.get('tool_calls', [])
+            used_web_search = any(
+                tc.get('tool') == 'web_search' for tc in tool_calls if isinstance(tc, dict)
+            )
             # Save session to database
             try:
-                # Add user message and assistant response to history
+                # Add user message and assistant response to history (include used_web_search for badge on reload)
+                assistant_entry = {"role": "assistant", "content": result.get("answer", "")}
+                if used_web_search:
+                    assistant_entry["used_web_search"] = True
                 new_history = conversation_history + [
                     {"role": "user", "content": chat_request.question},
-                    {"role": "assistant", "content": result.get("answer", "")}
+                    assistant_entry
                 ]
                 
                 if session:
@@ -209,8 +216,9 @@ async def stream_chat_response(
                 'answer': result.get('answer'),
                 'session_id': session_id,
                 'citations': result.get('citations', []),
-                'tool_calls': result.get('tool_calls', []),
+                'tool_calls': tool_calls,
                 'thinking_steps': result.get('thinking_steps', []),
+                'used_web_search': used_web_search,
                 'error': result.get('error')
             })}\n\n"
         
