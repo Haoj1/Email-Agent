@@ -15,7 +15,9 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
     triageStatus,
     triageLastComplete,
     triageLastError,
-    runTriage
+    triageAccountInfo,
+    runTriage,
+    setTriageAccountInfo
   } = useEmailCache();
   const [triageResults, setTriageResults] = useState(null);
   const [triagePage, setTriagePage] = useState(0);
@@ -43,13 +45,13 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
   useEffect(() => {
     if (user && user.authenticated) {
       loadTriageResults(null, false);
-      // Check immediately on mount/email change (respects global cooldown)
-      checkPendingTriage(selectedEmail);
+      // Check immediately on mount (respects global cooldown). Stats are global across all accounts.
+      checkPendingTriage(null);
       
       // Then check every 5 minutes (300000 ms) - global cooldown will handle skipping if needed
       const CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
       pendingTriageCheckIntervalRef.current = setInterval(() => {
-        checkPendingTriage(selectedEmail);
+        checkPendingTriage(null);
       }, CHECK_INTERVAL);
     }
     
@@ -85,7 +87,24 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
     stopTriagePolling();
     // Clear old results so progress UI is visible while running
     setTriageResults(null);
-    runTriage({ email: selectedEmail || null, days: 7, max_results: 100 });
+    // Run triage across all connected email accounts so user doesn't need to switch manually
+    const emails = (user?.emails || []).map((e) => e.email).filter(Boolean);
+    const uniqueEmails = Array.from(new Set(emails));
+    if (uniqueEmails.length === 0 && selectedEmail) {
+      setTriageAccountInfo({ email: selectedEmail, index: 0, total: 1 });
+      await runTriage({ email: selectedEmail, days: 7, max_results: 100 });
+    } else if (uniqueEmails.length === 0) {
+      setTriageAccountInfo({ email: null, index: 0, total: 1 });
+      await runTriage({ email: null, days: 7, max_results: 100 });
+    } else {
+      for (let i = 0; i < uniqueEmails.length; i += 1) {
+        const email = uniqueEmails[i];
+        setTriageAccountInfo({ email, index: i, total: uniqueEmails.length });
+        // eslint-disable-next-line no-await-in-loop
+        await runTriage({ email, days: 7, max_results: 100 });
+      }
+    }
+    setTriageAccountInfo(null);
   };
 
   const loadTriageResults = async (label = null, forceRefresh = false, returnData = false, isLoadMore = false, days = triageDaysFilter) => {
@@ -175,12 +194,13 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
           triageResults={triageResults}
           triageProgress={triageProgress}
           triageStatus={triageStatus}
+          triageAccountInfo={triageAccountInfo}
           pendingCount={pendingTriageCount}
           checkingPending={checkingPending}
           daysFilter={triageDaysFilter}
           onDaysFilterChange={handleDaysFilterChange}
           onRunTriage={handleRunTriage}
-          onRefreshStats={() => checkPendingTriage(selectedEmail, true)}
+          onRefreshStats={() => checkPendingTriage(null, true)}
           onLoadTriageResults={() => loadTriageResults(null, true)}
           onLoadMore={() => loadTriageResults(null, false, false, true)}
           onOpenThread={handleOpenThread}

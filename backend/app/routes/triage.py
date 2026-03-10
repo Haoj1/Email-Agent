@@ -520,50 +520,79 @@ async def get_triage_stats(
         # Trigger background sync and embedding whenever stats are checked
         # Use force=False to respect the 1-hour cooldown period
         background_tasks.add_task(sync_and_embed_emails, user_id, email, days, False)
-        
-        # 1. Get credentials and Gmail service
-        credentials = await get_user_credentials(request, email, db)
-        gmail_service = GmailService(credentials)
-        
-        # 2. Get recent threads from Gmail
-        raw_threads = gmail_service.get_threads(max_results=50, days=days)
-        if not raw_threads:
-            return {"pending_count": 0}
+
+        async def _pending_for_email(target_email: str) -> int:
+            """Compute pending triage count for a single email account."""
+            # 1. Get credentials and Gmail service
+            credentials = await get_user_credentials(request, target_email, db)
+            gmail_service = GmailService(credentials)
             
-        # 3. Normalize and get thread IDs
-        thread_ids = []
-        thread_message_counts = {}
-        for raw in raw_threads:
-            normalized = gmail_service.normalize_thread(raw)
-            if normalized and normalized.get('thread_id'):
-                tid = normalized['thread_id']
-                thread_ids.append(tid)
-                thread_message_counts[tid] = normalized.get('message_count', 0)
-        
-        if not thread_ids:
-            return {"pending_count": 0}
-            
-        # 4. Check database for existing triage results
-        query = select(TriageResult).where(
-            TriageResult.user_id == user_id,
-            TriageResult.thread_id.in_(thread_ids)
-        )
-        result = await db.execute(query)
-        existing_results = result.scalars().all()
-        existing_map = {r.thread_id: r.message_count for r in existing_results}
-        
-        # 5. Count how many need triage (new or updated)
-        pending_count = 0
-        for tid in thread_ids:
-            existing_count = existing_map.get(tid)
-            current_count = thread_message_counts.get(tid, 0)
-            
-            if existing_count is None or current_count > existing_count:
-                pending_count += 1
+            # 2. Get recent threads from Gmail
+            raw_threads = gmail_service.get_threads(max_results=50, days=days)
+            if not raw_threads:
+                return 0
                 
+            # 3. Normalize and get thread IDs
+            thread_ids = []
+            thread_message_counts = {}
+            for raw in raw_threads:
+                normalized = gmail_service.normalize_thread(raw)
+                if normalized and normalized.get('thread_id'):
+                    tid = normalized['thread_id']
+                    thread_ids.append(tid)
+                    thread_message_counts[tid] = normalized.get('message_count', 0)
+            
+            if not thread_ids:
+                return 0
+                
+            # 4. Check database for existing triage results
+            query = select(TriageResult).where(
+                TriageResult.user_id == user_id,
+                TriageResult.thread_id.in_(thread_ids)
+            )
+            result = await db.execute(query)
+            existing_results = result.scalars().all()
+            existing_map = {r.thread_id: r.message_count for r in existing_results}
+            
+            # 5. Count how many need triage (new or updated)
+            pending = 0
+            for tid in thread_ids:
+                existing_count = existing_map.get(tid)
+                current_count = thread_message_counts.get(tid, 0)
+                
+                if existing_count is None or current_count > existing_count:
+                    pending += 1
+            return pending
+
+        # If email is provided, compute stats for that account only (backward compatible)
+        if email:
+            pending_count = await _pending_for_email(email)
+            return {
+                "success": True,
+                "pending_count": pending_count
+            }
+
+        # Otherwise, aggregate pending counts across all user's verified email accounts
+        from app.models import UserEmail
+        result = await db.execute(
+            select(UserEmail).where(UserEmail.user_id == user_id)
+        )
+        user_emails = result.scalars().all()
+
+        if not user_emails:
+            return {"success": True, "pending_count": 0}
+
+        total_pending = 0
+        for ue in user_emails:
+            try:
+                total_pending += await _pending_for_email(ue.email)
+            except Exception as e:
+                # Log but continue with other accounts
+                print(f"Error computing triage stats for {ue.email}: {e}")
+
         return {
             "success": True,
-            "pending_count": pending_count
+            "pending_count": total_pending
         }
     except Exception as e:
         print(f"Error getting triage stats: {e}")

@@ -15,7 +15,7 @@ import './App.css';
 
 // Inner component that has access to EmailCache context
 function AppContent() {
-  const { resetPendingTriageCount, clearCooldownCache, checkPendingTriage } = useEmailCache();
+  const { resetPendingTriageCount, clearCooldownCache } = useEmailCache();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedEmail, setSelectedEmail] = useState(() => {
@@ -65,10 +65,6 @@ function AppContent() {
   const handleSelectEmail = (email) => {
     setSelectedEmail(email);
     localStorage.setItem('selectedEmail', email);
-    // Switching accounts should proactively fetch pending triage for that account
-    if (user?.authenticated) {
-      checkPendingTriage(email, true);
-    }
   };
 
   const handleLogout = async () => {

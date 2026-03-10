@@ -10,19 +10,28 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
   const [loadingThreads, setLoadingThreads] = useState(false);
   const [emailThreadsNextPageToken, setEmailThreadsNextPageToken] = useState(null);
   const [daysFilter, setDaysFilter] = useState(14); // Default to 14 days
+  const [searchQuery, setSearchQuery] = useState('');
   
   const navigate = useNavigate();
   const { getCachedThreads, setCachedThreads } = useEmailCache();
 
   useEffect(() => {
     if (user && user.authenticated) {
-      loadEmailThreads(selectedEmail, false, false, daysFilter);
+      loadEmailThreads(selectedEmail, false, false, daysFilter, searchQuery);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, selectedEmail]);
 
-  const loadEmailThreads = async (email = null, forceRefresh = false, isLoadMore = false, days = daysFilter) => {
-    if (!forceRefresh && !isLoadMore) {
+  const loadEmailThreads = async (
+    email = null,
+    forceRefresh = false,
+    isLoadMore = false,
+    days = daysFilter,
+    query = searchQuery
+  ) => {
+    const trimmedQuery = (query || '').trim();
+
+    if (!forceRefresh && !isLoadMore && !trimmedQuery) {
       const cached = getCachedThreads(email);
       // Only use cache if it matches current days filter
       if (cached && cached.days === days) {
@@ -40,6 +49,7 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
     try {
       const params = { max_results: 30, days: days || 14 };
       if (email) params.email = email;
+      if (trimmedQuery) params.q = trimmedQuery;
       if (isLoadMore && emailThreadsNextPageToken) {
         params.page_token = emailThreadsNextPageToken;
       }
@@ -73,7 +83,20 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
 
   const handleDaysFilterChange = (days) => {
     setDaysFilter(days);
-    loadEmailThreads(selectedEmail, true, false, days);
+    loadEmailThreads(selectedEmail, true, false, days, searchQuery);
+  };
+
+  const handleSearchChange = (value) => {
+    setSearchQuery(value);
+  };
+
+  const handleSearchSubmit = () => {
+    loadEmailThreads(selectedEmail, true, false, daysFilter, searchQuery);
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    loadEmailThreads(selectedEmail, true, false, daysFilter, '');
   };
 
   const handleOpenThread = (threadId) => {
@@ -88,12 +111,16 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
         <EmailThreadsCard
           loadingThreads={loadingThreads}
           onRefreshEmails={() => loadEmailThreads(selectedEmail, true)}
-          onLoadMore={() => loadEmailThreads(selectedEmail, false, true)}
+          onLoadMore={() => loadEmailThreads(selectedEmail, false, true, daysFilter, searchQuery)}
           hasMore={!!emailThreadsNextPageToken}
           emailThreads={emailThreads}
           onOpenThread={handleOpenThread}
           daysFilter={daysFilter}
           onDaysFilterChange={handleDaysFilterChange}
+          searchQuery={searchQuery}
+          onSearchChange={handleSearchChange}
+          onSearchSubmit={handleSearchSubmit}
+          onClearSearch={handleClearSearch}
         />
       </div>
     </div>

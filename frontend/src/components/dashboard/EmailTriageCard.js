@@ -7,6 +7,7 @@ export default function EmailTriageCard({
   triageResults,
   triageProgress,
   triageStatus,
+  triageAccountInfo,
   pendingCount,
   checkingPending,
   daysFilter,
@@ -24,17 +25,17 @@ export default function EmailTriageCard({
   return (
     <div className="card" style={isStandalonePage ? { maxWidth: '100%', width: '100%' } : {}}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <h2>Priority Inbox</h2>
+        <h2>Priority Inbox</h2>
         {!isStandalonePage && (
-          <button 
+          <button
             onClick={() => navigate('/triage')}
-            style={{ 
-              background: 'none', 
-              border: 'none', 
-              color: '#7b1fa2', 
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#7b1fa2',
               cursor: 'pointer',
               fontSize: '0.9em',
-              textDecoration: 'underline'
+              textDecoration: 'underline',
             }}
           >
             View Full Page →
@@ -42,17 +43,28 @@ export default function EmailTriageCard({
         )}
       </div>
       <p style={{ fontSize: '0.9em', color: '#666', marginBottom: '16px' }}>
-        AI highlights what matters most. Scan recent conversations to get categories, priority scores,
-        and summaries.
+        AI highlights what matters most. Scan recent conversations to get categories, priority
+        scores, and summaries.
       </p>
 
       {pendingCount > 0 && (
-        <p style={{ fontSize: '0.85em', color: '#d32f2f', marginBottom: '12px', fontWeight: 'bold' }}>
-          ● You have {pendingCount} new or updated conversation(s) that haven't been prioritized yet.
+        <p
+          style={{ fontSize: '0.85em', color: '#d32f2f', marginBottom: '12px', fontWeight: 'bold' }}
+        >
+          ● You have {pendingCount} new or updated conversation(s) that haven't been prioritized
+          yet.
         </p>
       )}
 
-      <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+      <div
+        style={{
+          marginBottom: '16px',
+          display: 'flex',
+          gap: '12px',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+        }}
+      >
         <button
           className="btn-primary"
           onClick={onRunTriage}
@@ -76,17 +88,19 @@ export default function EmailTriageCard({
             <>
               Update Priorities
               {pendingCount > 0 && (
-                <span style={{
-                  position: 'absolute',
-                  top: '-5px',
-                  right: '-5px',
-                  width: '12px',
-                  height: '12px',
-                  backgroundColor: '#ff1744',
-                  borderRadius: '50%',
-                  border: '2px solid white',
-                  boxShadow: '0 0 4px rgba(0,0,0,0.3)'
-                }} />
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '-5px',
+                    right: '-5px',
+                    width: '12px',
+                    height: '12px',
+                    backgroundColor: '#ff1744',
+                    borderRadius: '50%',
+                    border: '2px solid white',
+                    boxShadow: '0 0 4px rgba(0,0,0,0.3)',
+                  }}
+                />
               )}
             </>
           )}
@@ -104,7 +118,7 @@ export default function EmailTriageCard({
               fontSize: '0.85em',
               backgroundColor: '#fff',
               color: '#333',
-              outline: 'none'
+              outline: 'none',
             }}
           >
             <option value="">All Time</option>
@@ -136,19 +150,19 @@ export default function EmailTriageCard({
             color: '#5f6368',
             outline: 'none',
           }}
-          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(60, 64, 67, 0.1)'}
-          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(60, 64, 67, 0.1)')}
+          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
         >
-          <svg 
-            viewBox="0 0 24 24" 
-            style={{ 
-              width: '20px', 
+          <svg
+            viewBox="0 0 24 24"
+            style={{
+              width: '20px',
               height: '20px',
               fill: 'currentColor',
-              animation: checkingPending ? 'spin 1s linear infinite' : 'none'
+              animation: checkingPending ? 'spin 1s linear infinite' : 'none',
             }}
           >
-            <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.07 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+            <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.07 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" />
           </svg>
         </button>
       </div>
@@ -176,9 +190,7 @@ export default function EmailTriageCard({
           ></div>
           {triageProgress.total > 0 ? (
             <>
-              <p style={{ marginBottom: '12px' }}>
-                {triageStatus || 'Scanning for priorities...'}
-              </p>
+              <p style={{ marginBottom: '12px' }}>{triageStatus || 'Scanning for priorities...'}</p>
               <div
                 style={{
                   display: 'flex',
@@ -217,14 +229,42 @@ export default function EmailTriageCard({
                   {triageProgress.progress > 0 ? `${triageProgress.progress}%` : '0%'}
                 </span>
               </div>
-              <p style={{ fontSize: '0.9em', color: '#888' }}>
+              {triageAccountInfo && (
+                <p
+                  style={{
+                    marginTop: '6px',
+                    marginBottom: '6px',
+                    fontSize: '0.85em',
+                    color: '#555',
+                  }}
+                >
+                  Account {triageAccountInfo.index + 1}/{triageAccountInfo.total}:{' '}
+                  <strong>{triageAccountInfo.email || 'Primary account'}</strong>
+                </p>
+              )}
+              <p style={{ fontSize: '0.9em', color: '#888', marginTop: '2px' }}>
                 Processing {triageProgress.current} of {triageProgress.total} conversations
               </p>
             </>
           ) : (
-            <p>
-              {triageStatus || 'Scanning for priorities... (estimated ~1 minute)'}
-            </p>
+            <>
+              <p style={{ marginBottom: '12px' }}>
+                {triageStatus || 'Scanning for priorities... (estimated ~1 minute)'}
+              </p>
+              {triageAccountInfo && (
+                <p
+                  style={{
+                    marginTop: '6px',
+                    marginBottom: '4px',
+                    fontSize: '0.85em',
+                    color: '#555',
+                  }}
+                >
+                  Account {triageAccountInfo.index + 1}/{triageAccountInfo.total}:{' '}
+                  <strong>{triageAccountInfo.email || 'Primary account'}</strong>
+                </p>
+              )}
+            </>
           )}
         </div>
       )}
@@ -273,10 +313,10 @@ export default function EmailTriageCard({
                         result.priority >= 0.8
                           ? '#d32f2f'
                           : result.priority >= 0.5
-                          ? '#f57c00'
-                          : result.priority >= 0.2
-                          ? '#1976d2'
-                          : '#757575';
+                            ? '#f57c00'
+                            : result.priority >= 0.2
+                              ? '#1976d2'
+                              : '#757575';
                       const labelColor =
                         {
                           NEEDS_REPLY: '#d32f2f',
@@ -409,7 +449,9 @@ export default function EmailTriageCard({
                           padding: '8px 24px',
                         }}
                       >
-                        {loadingTriageResults ? 'Loading...' : `Load More (Showing ${triageResults.data.results.length} of ${triageResults.data.total_count})`}
+                        {loadingTriageResults
+                          ? 'Loading...'
+                          : `Load More (Showing ${triageResults.data.results.length} of ${triageResults.data.total_count})`}
                       </button>
                     </div>
                   )}
@@ -437,4 +479,3 @@ export default function EmailTriageCard({
     </div>
   );
 }
-

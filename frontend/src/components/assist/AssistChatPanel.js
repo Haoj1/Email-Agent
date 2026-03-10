@@ -617,8 +617,11 @@ function AssistChatPanel({ onClose, selectedEmail }) {
                           </div>
                         )}
                         {msg.used_web_search && (
-                          <div className="message-web-search-badge" title="This reply used web search for current information.">
-                            本条用到了联网搜索
+                          <div
+                            className="message-web-search-badge"
+                            title="This reply used web search for current information."
+                          >
+                            Used web search for this reply
                           </div>
                         )}
                       </div>

@@ -33,6 +33,7 @@ export const EmailCacheProvider = ({ children }) => {
   const [triageLastError, setTriageLastError] = useState(null); // { run_id, error }
   const triageRunIdRef = useRef(0);
   const triageAbortRef = useRef(null);
+  const [triageAccountInfo, setTriageAccountInfo] = useState(null); // { email, index, total }
   
   // Global cooldown mechanism - tracks last check time per email
   const lastCheckTimeRef = useRef({}); // { email: timestamp }
@@ -142,7 +143,8 @@ export const EmailCacheProvider = ({ children }) => {
 
   // Global checkPendingTriage function with cooldown
   const checkPendingTriage = useCallback(async (email, force = false) => {
-    const emailKey = email || 'primary';
+    // We track cooldown per logical scope. For global stats we use 'all' as the key.
+    const emailKey = email || 'all';
     const now = Date.now();
     const lastCheck = lastCheckTimeRef.current[emailKey];
 
@@ -155,9 +157,9 @@ export const EmailCacheProvider = ({ children }) => {
 
     setCheckingPending(true);
     try {
-      const response = await api.get('/triage/stats', {
-        params: { email, days: 7 }
-      });
+      const params = { days: 7 };
+      if (email) params.email = email;
+      const response = await api.get('/triage/stats', { params });
       if (response.data.success) {
         setPendingTriageCount(response.data.pending_count);
         // Update last check time
@@ -264,7 +266,7 @@ export const EmailCacheProvider = ({ children }) => {
             // Clear pending count after a successful run and force refresh stats
             if (data.success) {
               setPendingTriageCount(0);
-              checkPendingTriage(email || null, true);
+              checkPendingTriage(null, true);
             }
           } else if (data.type === 'error') {
             const errMsg = data.error || 'Unknown error';
@@ -316,9 +318,11 @@ export const EmailCacheProvider = ({ children }) => {
     triageStatus,
     triageLastComplete,
     triageLastError,
+    triageAccountInfo,
     runTriage,
     resetPendingTriageCount,
-    clearCooldownCache
+    clearCooldownCache,
+    setTriageAccountInfo,
   };
 
   return (

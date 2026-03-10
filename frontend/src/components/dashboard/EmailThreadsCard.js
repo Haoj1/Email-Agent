@@ -10,6 +10,10 @@ export default function EmailThreadsCard({
   onOpenThread,
   daysFilter,
   onDaysFilterChange,
+  searchQuery,
+  onSearchChange,
+  onSearchSubmit,
+  onClearSearch,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -68,6 +72,45 @@ export default function EmailThreadsCard({
         </button>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+          <input
+            type="text"
+            placeholder="Search conversations (subject, sender, etc.)"
+            value={searchQuery || ''}
+            onChange={(e) => onSearchChange && onSearchChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && onSearchSubmit) {
+                onSearchSubmit();
+              }
+            }}
+            style={{
+              padding: '6px 10px',
+              borderRadius: '4px',
+              border: '1px solid #ddd',
+              fontSize: '0.85em',
+              minWidth: '220px',
+            }}
+          />
+          <button
+            className="btn-secondary"
+            style={{ minHeight: '32px', padding: '6px 12px' }}
+            onClick={onSearchSubmit}
+            disabled={loadingThreads}
+          >
+            Search
+          </button>
+          {searchQuery && searchQuery.trim() && (
+            <button
+              className="btn-secondary"
+              style={{ minHeight: '32px', padding: '6px 12px' }}
+              onClick={onClearSearch}
+              disabled={loadingThreads}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <label style={{ fontSize: '0.85em', color: '#666' }}>Time Range:</label>
           <select
             value={daysFilter || '14'}

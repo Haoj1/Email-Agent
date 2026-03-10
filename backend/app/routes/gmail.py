@@ -32,6 +32,7 @@ async def get_email_threads(
     days: int = Query(7, ge=1, le=30, description="Number of days to look back"),
     email: Optional[str] = Query(None, description="Email to use (default: primary)"),
     page_token: Optional[str] = Query(None, description="Page token for pagination"),
+    q: Optional[str] = Query(None, description="Gmail search query (uses Gmail's search syntax)"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -44,9 +45,14 @@ async def get_email_threads(
         credentials = await get_user_credentials(request, email, db)
         service = build('gmail', 'v1', credentials=credentials)
         
-        # Calculate date filter
-        after_date = (datetime.now() - timedelta(days=days)).strftime('%Y/%m/%d')
-        query = f'after:{after_date}'
+        # Calculate query
+        # If custom search query q is provided, use it directly (no time restriction)
+        # Otherwise, default to recent threads using an after: filter
+        if q:
+            query = q
+        else:
+            after_date = (datetime.now() - timedelta(days=days)).strftime('%Y/%m/%d')
+            query = f'after:{after_date}'
         
         # Get threads
         list_params = {
