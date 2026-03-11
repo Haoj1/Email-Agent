@@ -41,6 +41,11 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   const [showAssistChat, setShowAssistChat] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0); // 0 = inactive, 1..N = steps
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const onboardingAccountsRef = useRef(null);
+  const onboardingConversationsRef = useRef(null);
+  const onboardingPriorityRef = useRef(null);
+  const onboardingCopilotRef = useRef(null);
+  const onboardingCalendarRef = useRef(null);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const {
@@ -60,13 +65,9 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
       }, 500);
     }
 
-    // On first visit (per browser), auto-open Inbox Copilot once for convenience
+    // Always open Inbox Copilot on Dashboard when logged in
     if (user && user.authenticated) {
-      const autoKey = 'emailAgent_autoOpenedCopilot';
-      if (!sessionStorage.getItem(autoKey)) {
-        setShowAssistChat(true);
-        sessionStorage.setItem(autoKey, 'true');
-      }
+      setShowAssistChat(true);
 
       // New user onboarding: only if not completed before
       const onboardingKey = 'emailAgent_onboarding_completed';
@@ -77,6 +78,31 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
+  useEffect(() => {
+    if (!showOnboarding || !onboardingStep) return;
+
+    const el =
+      onboardingStep === 1
+        ? onboardingAccountsRef.current
+        : onboardingStep === 2
+        ? onboardingConversationsRef.current
+        : onboardingStep === 3
+        ? onboardingPriorityRef.current
+        : onboardingStep === 4
+        ? onboardingCopilotRef.current
+        : onboardingStep === 5
+        ? onboardingCalendarRef.current
+        : null;
+
+    if (!el || typeof el.scrollIntoView !== 'function') return;
+
+    // Defer to next paint so layout is stable before scrolling
+    const id = window.requestAnimationFrame(() => {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [showOnboarding, onboardingStep]);
 
   const triagePollingRef = useRef(null);
   const TRIAGE_POLL_INTERVAL = 3000; 
@@ -349,8 +375,8 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   };
 
   const handleOnboardingNext = () => {
-    // Define 4 steps: 1=Accounts, 2=Conversations, 3=Priority Inbox, 4=Inbox Copilot
-    if (onboardingStep >= 4) {
+    // Define 5 steps: 1=Accounts, 2=Conversations, 3=Priority Inbox, 4=Inbox Copilot, 5=Calendar
+    if (onboardingStep >= 5) {
       completeOnboarding();
     } else {
       setOnboardingStep(onboardingStep + 1);
@@ -365,6 +391,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     <div className="dashboard-container">
       <div className="dashboard-content">
         <div
+          ref={onboardingAccountsRef}
           className={`onboarding-section ${
             showOnboarding && onboardingStep === 1 ? 'onboarding-active' : ''
           }`}
@@ -396,6 +423,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
         </div>
 
         <div
+          ref={onboardingCopilotRef}
           className={`onboarding-section ${
             showOnboarding && onboardingStep === 4 ? 'onboarding-active' : ''
           }`}
@@ -413,7 +441,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
                   Skip guide
                 </button>
                 <button className="btn-primary" onClick={handleOnboardingNext}>
-                  Finish
+                  Next
                 </button>
               </div>
             </div>
@@ -421,6 +449,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
         </div>
 
         <div
+          ref={onboardingConversationsRef}
           className={`onboarding-section ${
             showOnboarding && onboardingStep === 2 ? 'onboarding-active' : ''
           }`}
@@ -461,6 +490,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
         </div>
 
         <div
+          ref={onboardingPriorityRef}
           className={`onboarding-section ${
             showOnboarding && onboardingStep === 3 ? 'onboarding-active' : ''
           }`}
@@ -501,8 +531,30 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
           )}
         </div>
 
-        <div className="dashboard-grid-span-full">
+        <div
+          ref={onboardingCalendarRef}
+          className={`dashboard-grid-span-full onboarding-section ${
+            showOnboarding && onboardingStep === 5 ? 'onboarding-active' : ''
+          }`}
+        >
           <SuggestedScheduleCard selectedEmail={selectedEmail} />
+          {showOnboarding && onboardingStep === 5 && (
+            <div className="onboarding-tooltip">
+              <h3 className="onboarding-title">Suggested Schedule</h3>
+              <p className="onboarding-text">
+                Turn important emails into a weekly plan. Drag to move, resize to adjust duration,
+                and confirm to create calendar events.
+              </p>
+              <div className="onboarding-buttons">
+                <button className="btn-secondary" onClick={handleOnboardingSkip}>
+                  Skip guide
+                </button>
+                <button className="btn-primary" onClick={handleOnboardingNext}>
+                  Finish
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
       <footer className="dashboard-footer">

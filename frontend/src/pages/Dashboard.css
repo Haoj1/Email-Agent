@@ -242,7 +242,7 @@
 
 .dashboard-help-button {
   position: fixed;
-  right: 24px;
+  left: 24px;
   bottom: 24px;
   width: 44px;
   height: 44px;
