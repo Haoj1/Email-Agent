@@ -39,6 +39,8 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   const [addingEmail, setAddingEmail] = useState(false);
   const [addEmailError, setAddEmailError] = useState(null);
   const [showAssistChat, setShowAssistChat] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0); // 0 = inactive, 1..N = steps
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const {
@@ -57,8 +59,24 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
         setSearchParams({});
       }, 500);
     }
+
+    // On first visit (per browser), auto-open Inbox Copilot once for convenience
+    if (user && user.authenticated) {
+      const autoKey = 'emailAgent_autoOpenedCopilot';
+      if (!sessionStorage.getItem(autoKey)) {
+        setShowAssistChat(true);
+        sessionStorage.setItem(autoKey, 'true');
+      }
+
+      // New user onboarding: only if not completed before
+      const onboardingKey = 'emailAgent_onboarding_completed';
+      if (!localStorage.getItem(onboardingKey)) {
+        setShowOnboarding(true);
+        setOnboardingStep(1);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user]);
 
   const triagePollingRef = useRef(null);
   const TRIAGE_POLL_INTERVAL = 3000; 
@@ -320,52 +338,168 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     loadEmailThreads(selectedEmail, true, false, emailThreads?.days || 14);
   };
 
+  const completeOnboarding = () => {
+    setShowOnboarding(false);
+    setOnboardingStep(0);
+    try {
+      localStorage.setItem('emailAgent_onboarding_completed', 'true');
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  const handleOnboardingNext = () => {
+    // Define 4 steps: 1=Accounts, 2=Conversations, 3=Priority Inbox, 4=Inbox Copilot
+    if (onboardingStep >= 4) {
+      completeOnboarding();
+    } else {
+      setOnboardingStep(onboardingStep + 1);
+    }
+  };
+
+  const handleOnboardingSkip = () => {
+    completeOnboarding();
+  };
+
   return (
     <div className="dashboard-container">
       <div className="dashboard-content">
-        <EmailAccountsCard
-          user={user}
-          selectedEmail={selectedEmail}
-          onSelectEmail={onSelectEmail}
-          onAddEmail={handleAddEmail}
-          addingEmail={addingEmail}
-          addEmailError={addEmailError}
-        />
+        <div
+          className={`onboarding-section ${
+            showOnboarding && onboardingStep === 1 ? 'onboarding-active' : ''
+          }`}
+        >
+          <EmailAccountsCard
+            user={user}
+            selectedEmail={selectedEmail}
+            onSelectEmail={onSelectEmail}
+            onAddEmail={handleAddEmail}
+            addingEmail={addingEmail}
+            addEmailError={addEmailError}
+          />
+          {showOnboarding && onboardingStep === 1 && (
+            <div className="onboarding-tooltip">
+              <h3 className="onboarding-title">Choose your email account</h3>
+              <p className="onboarding-text">
+                Here you can see all connected accounts, switch between them, and add new inboxes.
+              </p>
+              <div className="onboarding-buttons">
+                <button className="btn-secondary" onClick={handleOnboardingSkip}>
+                  Skip guide
+                </button>
+                <button className="btn-primary" onClick={handleOnboardingNext}>
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
-        <AssistChatCard onOpenChat={() => setShowAssistChat(true)} />
+        <div
+          className={`onboarding-section ${
+            showOnboarding && onboardingStep === 4 ? 'onboarding-active' : ''
+          }`}
+        >
+          <AssistChatCard onOpenChat={() => setShowAssistChat(true)} />
+          {showOnboarding && onboardingStep === 4 && (
+            <div className="onboarding-tooltip">
+              <h3 className="onboarding-title">Inbox Copilot</h3>
+              <p className="onboarding-text">
+                Chat with an AI assistant about your emails, ask how to use this app, and get
+                step‑by‑step help.
+              </p>
+              <div className="onboarding-buttons">
+                <button className="btn-secondary" onClick={handleOnboardingSkip}>
+                  Skip guide
+                </button>
+                <button className="btn-primary" onClick={handleOnboardingNext}>
+                  Finish
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
-        <EmailThreadsCard
-          loadingThreads={loadingThreads}
-          onRefreshEmails={() => loadEmailThreads(selectedEmail, true)}
-          onLoadMore={() => loadEmailThreads(selectedEmail, false, true, emailThreads?.days)}
-          hasMore={!!emailThreadsNextPageToken}
-          emailThreads={emailThreads}
-          onOpenThread={handleOpenThread}
-          daysFilter={emailThreads?.days || 14}
-          onDaysFilterChange={handleThreadsDaysFilterChange}
-          searchQuery={threadsSearchQuery}
-          onSearchChange={handleThreadsSearchChange}
-          onSearchSubmit={handleThreadsSearchSubmit}
-          onClearSearch={handleThreadsClearSearch}
-        />
+        <div
+          className={`onboarding-section ${
+            showOnboarding && onboardingStep === 2 ? 'onboarding-active' : ''
+          }`}
+        >
+          <EmailThreadsCard
+            loadingThreads={loadingThreads}
+            onRefreshEmails={() => loadEmailThreads(selectedEmail, true)}
+            onLoadMore={() =>
+              loadEmailThreads(selectedEmail, false, true, emailThreads?.days)
+            }
+            hasMore={!!emailThreadsNextPageToken}
+            emailThreads={emailThreads}
+            onOpenThread={handleOpenThread}
+            daysFilter={emailThreads?.days || 14}
+            onDaysFilterChange={handleThreadsDaysFilterChange}
+            searchQuery={threadsSearchQuery}
+            onSearchChange={handleThreadsSearchChange}
+            onSearchSubmit={handleThreadsSearchSubmit}
+            onClearSearch={handleThreadsClearSearch}
+          />
+          {showOnboarding && onboardingStep === 2 && (
+            <div className="onboarding-tooltip">
+              <h3 className="onboarding-title">Conversations</h3>
+              <p className="onboarding-text">
+                Browse and search your email threads by time range or keyword, and open any
+                conversation in detail.
+              </p>
+              <div className="onboarding-buttons">
+                <button className="btn-secondary" onClick={handleOnboardingSkip}>
+                  Skip guide
+                </button>
+                <button className="btn-primary" onClick={handleOnboardingNext}>
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
-        <EmailTriageCard
-          runningTriage={triageRunning}
-          loadingTriageResults={loadingTriageResults}
-          triageResults={triageResults}
-          triageProgress={triageProgress}
-          triageStatus={triageStatus}
-          triageAccountInfo={triageAccountInfo}
-          pendingCount={pendingTriageCount}
-          checkingPending={checkingPending}
-          daysFilter={triageDaysFilter}
-          onDaysFilterChange={handleDaysFilterChange}
-          onRunTriage={handleRunTriage}
-          onRefreshStats={() => checkPendingTriage(null, true)}
-          onLoadTriageResults={() => loadTriageResults(null, true)}
-          onLoadMore={() => loadTriageResults(null, false, false, true)}
-          onOpenThread={handleOpenThread}
-        />
+        <div
+          className={`onboarding-section ${
+            showOnboarding && onboardingStep === 3 ? 'onboarding-active' : ''
+          }`}
+        >
+          <EmailTriageCard
+            runningTriage={triageRunning}
+            loadingTriageResults={loadingTriageResults}
+            triageResults={triageResults}
+            triageProgress={triageProgress}
+            triageStatus={triageStatus}
+            triageAccountInfo={triageAccountInfo}
+            pendingCount={pendingTriageCount}
+            checkingPending={checkingPending}
+            daysFilter={triageDaysFilter}
+            onDaysFilterChange={handleDaysFilterChange}
+            onRunTriage={handleRunTriage}
+            onRefreshStats={() => checkPendingTriage(null, true)}
+            onLoadTriageResults={() => loadTriageResults(null, true)}
+            onLoadMore={() => loadTriageResults(null, false, false, true)}
+            onOpenThread={handleOpenThread}
+          />
+          {showOnboarding && onboardingStep === 3 && (
+            <div className="onboarding-tooltip">
+              <h3 className="onboarding-title">Priority Inbox</h3>
+              <p className="onboarding-text">
+                Run Update Priorities to scan for important emails, then work through the
+                high‑priority list first.
+              </p>
+              <div className="onboarding-buttons">
+                <button className="btn-secondary" onClick={handleOnboardingSkip}>
+                  Skip guide
+                </button>
+                <button className="btn-primary" onClick={handleOnboardingNext}>
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         <div className="dashboard-grid-span-full">
           <SuggestedScheduleCard selectedEmail={selectedEmail} />
@@ -402,6 +536,16 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
           <p>&copy; {new Date().getFullYear()} Email Agent. All rights reserved.</p>
         </div>
       </footer>
+      <button
+        type="button"
+        className="dashboard-help-button"
+        onClick={() => {
+          setShowOnboarding(true);
+          setOnboardingStep(1);
+        }}
+      >
+        ?
+      </button>
       <div className={`thread-chat-wrapper ${showAssistChat ? 'open' : ''}`}>
         <AssistChatPanel
           onClose={() => setShowAssistChat(false)}
