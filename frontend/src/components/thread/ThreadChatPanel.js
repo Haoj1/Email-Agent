@@ -1,3 +1,4 @@
+import WorkspaceIcon from '../workspace/WorkspaceIcon';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { api } from '../../services/api';
@@ -445,7 +446,7 @@ function ThreadChatPanel({ threadId, email, onClose }) {
               onClick={handleClearHistory}
               title="Clear conversation history"
             >
-              🗑️
+              <WorkspaceIcon name="trash" />
             </button>
           )}
           <button
@@ -453,10 +454,10 @@ function ThreadChatPanel({ threadId, email, onClose }) {
             onClick={() => setIsMinimized(!isMinimized)}
             title={isMinimized ? 'Expand' : 'Minimize'}
           >
-            {isMinimized ? '▲' : '▼'}
+            <WorkspaceIcon name="chevron" className={isMinimized ? 'workspace-rotated' : ''} />
           </button>
           <button className="chat-action-btn" onClick={onClose} title="Close">
-            ×
+            <WorkspaceIcon name="close" />
           </button>
         </div>
       </div>
@@ -713,8 +714,9 @@ function ThreadChatPanel({ threadId, email, onClose }) {
                 className="send-button"
                 onClick={handleSend}
                 disabled={!input.trim() || loading}
+                aria-label="Send message"
               >
-                {loading ? '...' : '→'}
+                {loading ? '…' : <WorkspaceIcon name="send" />}
               </button>
             </div>
           </div>

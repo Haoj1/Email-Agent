@@ -11,7 +11,6 @@ from sqlalchemy import select
 from app.database import get_db
 from app.routes.auth import get_user_credentials, get_current_user_id
 from app.services.gmail_service import GmailService
-from app.agents.thread_chat_agent import ThreadChatAgent
 from app.models import UserEmail
 
 router = APIRouter()
@@ -133,6 +132,8 @@ async def stream_chat_response(
             return
         
         # Initialize agent with the correct email account
+        from app.agents.thread_chat_agent import ThreadChatAgent
+
         agent = ThreadChatAgent(gmail_service, final_email)
         
         # Shared list to collect steps (thread-safe with lock)
@@ -304,6 +305,8 @@ async def stream_draft_response(
             return
         
         # Initialize agent
+        from app.agents.thread_chat_agent import ThreadChatAgent
+
         agent = ThreadChatAgent(gmail_service, final_email)
         
         # Shared list to collect steps (thread-safe with lock)

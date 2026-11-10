@@ -14,7 +14,6 @@ from app.database import get_db
 from app.routes.auth import get_user_credentials, get_current_user_id
 from app.services.gmail_service import GmailService
 from app.services.background_tasks import sync_and_embed_emails
-from app.agents.triage_agent import TriageAgent
 from app.models import TriageResult, User
 from sqlalchemy import select
 
@@ -165,6 +164,8 @@ async def stream_triage_progress(
         
         def run_triage():
             try:
+                from app.agents.triage_agent import TriageAgent
+
                 triage_agent = TriageAgent()
                 # Use concurrent processing with 4 workers
                 results = triage_agent.triage_batch(
@@ -425,6 +426,8 @@ async def run_triage_sync(
         
         # Run Triage Agent only on threads that need triage
         print(f"Running triage on {len(threads_to_triage)} threads (skipped {skipped_count} with no new messages)...")
+        from app.agents.triage_agent import TriageAgent
+
         triage_agent = TriageAgent()
         # Use concurrent processing with 4 workers
         triage_results = triage_agent.triage_batch(threads_to_triage, max_workers=4)

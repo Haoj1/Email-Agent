@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
+import WorkspaceIcon from '../workspace/WorkspaceIcon';
 import { Link, useLocation } from 'react-router-dom';
 
 const dateLabel = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
@@ -13,20 +14,37 @@ export default function EmailThreadsCard({
   daysFilter, onDaysFilterChange, searchQuery, onSearchChange, onSearchSubmit, onClearSearch,
 }) {
   const isStandalonePage = useLocation().pathname === '/threads';
+  const searchInput = useRef(null);
+  useEffect(() => {
+    const focusSearch = event => {
+      if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented
+        || event.target.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+      event.preventDefault();
+      searchInput.current?.focus();
+    };
+    window.addEventListener('keydown', focusSearch);
+    return () => window.removeEventListener('keydown', focusSearch);
+  }, []);
+
   const threads = emailThreads?.data?.threads || [];
 
   return (
     <section className="card workspace-card conversation-card" aria-labelledby="conversations-title">
       <div className="workspace-card-heading">
         <div>
-          <p className="workspace-eyebrow">MAILBOX</p>
+          <p className="workspace-eyebrow"><WorkspaceIcon name="mail" /> MAILBOX</p>
           <h2 id="conversations-title">Conversations</h2>
         </div>
-        {!isStandalonePage && <Link className="workspace-link" to="/threads">Open inbox <span aria-hidden="true">↗</span></Link>}
+        {!isStandalonePage && <Link className="workspace-link" to="/threads">Open inbox <WorkspaceIcon name="arrow" /></Link>}
       </div>
       <form className="workspace-toolbar" onSubmit={event => { event.preventDefault(); onSearchSubmit(); }}>
-        <input type="search" aria-label="Search conversations" placeholder="Subject, sender, or keyword"
-          value={searchQuery || ''} onChange={event => onSearchChange(event.target.value)} />
+        <label className="workspace-search-field">
+          <WorkspaceIcon name="search" />
+          <input ref={searchInput} type="search" aria-label="Search conversations" aria-keyshortcuts="/"
+            placeholder="Subject, sender, or keyword" value={searchQuery || ''}
+            onChange={event => onSearchChange(event.target.value)} />
+          <kbd aria-hidden="true">/</kbd>
+        </label>
         <button type="submit" className="btn-secondary" disabled={loadingThreads}>Search</button>
         {searchQuery?.trim() && <button type="button" className="workspace-quiet" onClick={onClearSearch}>Clear</button>}
       </form>

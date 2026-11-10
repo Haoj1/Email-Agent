@@ -162,7 +162,7 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
         startEditable: true,
         backgroundColor: checked ? '#7b1fa2' : 'rgba(123, 31, 162, 0.35)',
         borderColor: checked ? '#6a1b9a' : 'rgba(123, 31, 162, 0.55)',
-        textColor: checked ? '#fff' : '#2b0a3d',
+        textColor: checked ? 'var(--panel, #fff)' : '#2b0a3d',
         extendedProps: {
           kind: 'suggestion',
           thread_id: s.thread_id,
@@ -182,7 +182,7 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px' }}>
         <div>
           <h2 style={{ marginBottom: '6px' }}>Suggested Schedule</h2>
-          <p style={{ margin: 0, fontSize: '0.9em', color: '#666' }}>
+          <p style={{ margin: 0, fontSize: '0.9em', color: 'var(--muted, #666)' }}>
             Auto-plans follow‑ups from your Priority Inbox into open time on your calendar. Review first, then confirm.
           </p>
         </div>
@@ -194,7 +194,6 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
             className="btn-primary"
             onClick={handleConfirm}
             disabled={confirming || loading || selectedSuggestions.length === 0}
-            style={{ backgroundColor: '#7b1fa2' }}
           >
             {confirming ? 'Creating…' : `Confirm & Create (${selectedSuggestions.length})`}
           </button>
@@ -203,7 +202,7 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
 
       <div style={{ marginTop: '14px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <label style={{ fontSize: '0.85em', color: '#666' }}>Schedule:</label>
+          <label style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>Schedule:</label>
           <select
             value={days}
             onChange={(e) => setDays(parseInt(e.target.value))}
@@ -214,8 +213,8 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
               borderRadius: '4px',
               border: '1px solid #ddd',
               fontSize: '14px',
-              backgroundColor: '#fff',
-              color: '#333',
+              backgroundColor: 'var(--panel, #fff)',
+              color: 'var(--ink, #333)',
               outline: 'none',
             }}
           >
@@ -224,7 +223,7 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
             <option value={14}>Next 2 weeks</option>
           </select>
 
-          <label style={{ fontSize: '0.85em', color: '#666' }}>From Priority Inbox:</label>
+          <label style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>From Priority Inbox:</label>
           <select
             value={triageDays}
             onChange={(e) => setTriageDays(parseInt(e.target.value))}
@@ -235,8 +234,8 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
               borderRadius: '4px',
               border: '1px solid #ddd',
               fontSize: '14px',
-              backgroundColor: '#fff',
-              color: '#333',
+              backgroundColor: 'var(--panel, #fff)',
+              color: 'var(--ink, #333)',
               outline: 'none',
             }}
           >
@@ -245,7 +244,7 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
             <option value={7}>Last Week</option>
           </select>
 
-          <label style={{ fontSize: '0.85em', color: '#666' }}>Max items:</label>
+          <label style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>Max items:</label>
           <select
             value={maxItems}
             onChange={(e) => setMaxItems(parseInt(e.target.value))}
@@ -256,8 +255,8 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
               borderRadius: '4px',
               border: '1px solid #ddd',
               fontSize: '14px',
-              backgroundColor: '#fff',
-              color: '#333',
+              backgroundColor: 'var(--panel, #fff)',
+              color: 'var(--ink, #333)',
               outline: 'none',
             }}
           >
@@ -274,7 +273,7 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
           </button>
         </div>
 
-        <div style={{ marginLeft: 'auto', fontSize: '0.85em', color: '#666' }}>
+        <div style={{ marginLeft: 'auto', fontSize: '0.85em', color: 'var(--muted, #666)' }}>
           Avoiding <strong>{busyCount}</strong> existing calendar event(s)
         </div>
       </div>
@@ -300,21 +299,21 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
 
       <div style={{ marginTop: '16px' }}>
         {loading && (
-          <div style={{ padding: '16px', backgroundColor: '#f5f5f5', borderRadius: '4px', color: '#666', textAlign: 'center' }}>
+          <div style={{ padding: '16px', backgroundColor: 'var(--surface, #f5f5f5)', borderRadius: '4px', color: 'var(--muted, #666)', textAlign: 'center' }}>
             <span className="spinner" style={{ marginRight: '10px' }}></span>
             Generating suggestions…
           </div>
         )}
 
         {!loading && suggestions.length === 0 && !error && (
-          <div style={{ padding: '16px', backgroundColor: '#f5f5f5', borderRadius: '4px', color: '#666' }}>
+          <div style={{ padding: '16px', backgroundColor: 'var(--surface, #f5f5f5)', borderRadius: '4px', color: 'var(--muted, #666)' }}>
             No suggested follow‑ups found for the selected range. Try expanding the time range or increasing Priority Inbox lookback.
           </div>
         )}
 
         {!loading && suggestions.length > 0 && (
           <>
-            <div style={{ border: '1px solid #eee', borderRadius: '10px', overflow: 'hidden', background: '#fff' }}>
+            <div style={{ border: '1px solid var(--line, #eee)', borderRadius: '10px', overflow: 'hidden', background: 'var(--panel, #fff)' }}>
               <FullCalendar
                 ref={calendarRef}
                 plugins={[timeGridPlugin, interactionPlugin]}
@@ -385,21 +384,21 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
             </div>
 
             <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
-              <div style={{ fontSize: '0.85em', color: '#666' }}>
+              <div style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>
                 Tip: click a block to select/deselect. Drag to move. Resize to change duration.
               </div>
               <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                   <span style={{ width: 10, height: 10, borderRadius: 2, background: '#7b1fa2', display: 'inline-block' }} />
-                  <span style={{ fontSize: '0.85em', color: '#666' }}>Selected</span>
+                  <span style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>Selected</span>
                 </div>
                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                   <span style={{ width: 10, height: 10, borderRadius: 2, background: 'rgba(123, 31, 162, 0.35)', display: 'inline-block' }} />
-                  <span style={{ fontSize: '0.85em', color: '#666' }}>Not selected</span>
+                  <span style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>Not selected</span>
                 </div>
                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                   <span style={{ width: 10, height: 10, borderRadius: 2, background: 'rgba(60, 64, 67, 0.12)', display: 'inline-block' }} />
-                  <span style={{ fontSize: '0.85em', color: '#666' }}>Busy</span>
+                  <span style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>Busy</span>
                 </div>
               </div>
             </div>
@@ -407,16 +406,16 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
             {selectedSuggestions.length > 0 && (
               <div style={{ marginTop: '12px' }}>
                 <div style={{ fontWeight: 700, marginBottom: '8px' }}>Selected items</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '10px' }}>
                   {selectedSuggestions.slice(0, 12).map((s) => (
-                    <div key={s._key} style={{ border: '1px solid #eee', borderRadius: 8, padding: 10, background: '#fff' }}>
+                    <div key={s._key} style={{ border: '1px solid var(--line, #eee)', borderRadius: 8, padding: 10, background: 'var(--panel, #fff)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-                        <div style={{ fontWeight: 700, color: '#333' }}>{s.title}</div>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: '#7b1fa2' }}>
+                        <div style={{ fontWeight: 700, color: 'var(--ink, #333)' }}>{s.title}</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent-dark, #7b1fa2)' }}>
                           {s.priority != null ? `${Math.round(s.priority * 100)}%` : ''}
                         </div>
                       </div>
-                      <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                      <div style={{ fontSize: 12, color: 'var(--muted, #666)', marginTop: 4 }}>
                         {new Date(s.start_iso).toLocaleString()} → {new Date(s.end_iso).toLocaleTimeString()}
                       </div>
                       <div style={{ marginTop: 8, display: 'flex', gap: 10, flexWrap: 'wrap' }}>

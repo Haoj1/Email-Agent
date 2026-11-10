@@ -127,3 +127,18 @@
 .login-footer .footer-link:hover {
   text-decoration: underline;
 }
+
+.login-container {
+  color-scheme: dark;
+  background: radial-gradient(ellipse at 55% 2%, #183b4a, #0b1220 64%);
+}
+.login-card { background: #121d2e; color: #edf4ff; border: 1px solid #2b4e63; border-radius: 18px; }
+.login-card h1, .info-box h3 { color: #edf4ff; }
+.login-card :is(.subtitle, .info-box li, .note, .login-footer p) { color: #aebfd6; }
+.login-card .info-box { background: #0d1728; border: 1px solid #26374d; }
+.login-card .info-box li::before, .login-footer .footer-link { color: #96f2dc; }
+.login-footer { border-color: #26374d; }
+.login-card .error { background: #382432; color: #ffadba; }
+@media (max-width: 540px) {
+  .login-card { padding: 24px; }
+}

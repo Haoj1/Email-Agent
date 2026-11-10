@@ -1,3 +1,4 @@
+import WorkspaceIcon from '../components/workspace/WorkspaceIcon';
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../services/api';
@@ -105,7 +106,7 @@ function ThreadDetail({ primaryEmail }) {
     <div className="thread-detail-container">
       <div className="thread-header">
         <button className="btn-back" onClick={() => navigate('/dashboard')}>
-          ← Back to Dashboard
+          <WorkspaceIcon name="back" /> Back to Dashboard
         </button>
         <h1>{subject}</h1>
         <div className="thread-info">
@@ -119,25 +120,25 @@ function ThreadDetail({ primaryEmail }) {
             className="btn-gmail"
             title="View in Gmail"
           >
-            Go to Gmail
+            <WorkspaceIcon name="arrow" /> Go to Gmail
           </a>
           <button
             className="btn-chat"
             onClick={() => setShowChat(!showChat)}
             title={showChat ? 'Close Chat' : 'Open Chat'}
           >
-            {showChat ? 'Close assistant' : 'Ask about this thread'}
+            <WorkspaceIcon name="spark" /> {showChat ? 'Close assistant' : 'Ask about this thread'}
           </button>
         </div>
       </div>
 
       {related.length > 0 && (
         <section className="workspace-related" aria-labelledby="related-title">
-          <p className="workspace-eyebrow">THREAD CONTEXT</p>
+          <p className="workspace-eyebrow"><WorkspaceIcon name="link" /> THREAD CONTEXT</p>
           <h2 id="related-title">Related conversations</h2>
           <ul>{related.map(({ thread: item, reason }) => (
             <li key={item.thread_id}>
-              <Link to={`/thread/${encodeURIComponent(item.thread_id)}${relatedSearch}`}><strong>{item.subject}</strong><small>{reason}</small></Link>
+              <Link to={`/thread/${encodeURIComponent(item.thread_id)}${relatedSearch}`}><WorkspaceIcon name="link" /><strong>{item.subject}</strong><small>{reason}</small></Link>
             </li>
           ))}</ul>
         </section>

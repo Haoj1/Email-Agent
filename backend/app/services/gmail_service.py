@@ -27,16 +27,7 @@ class GmailService:
         Returns:
             List of thread dictionaries (raw Gmail format)
         """
-        after_date = (datetime.now() - timedelta(days=days)).strftime('%Y/%m/%d')
-        query = f'after:{after_date}'
-        
-        result = self.service.users().threads().list(
-            userId='me',
-            maxResults=max_results,
-            q=query
-        ).execute()
-        
-        threads = result.get('threads', [])
+        threads = self._list_recent_threads(max_results, days)
         thread_details = []
         
         for thread in threads[:max_results]:
@@ -54,6 +45,21 @@ class GmailService:
         
         return thread_details
     
+    def _list_recent_threads(self, max_results: int, days: int) -> List[Dict]:
+        after_date = (datetime.now() - timedelta(days=days)).strftime('%Y/%m/%d')
+        query = f'after:{after_date}'
+
+        result = self.service.users().threads().list(
+            userId='me',
+            maxResults=max_results,
+            q=query
+        ).execute()
+
+        return result.get('threads', [])
+
+    def get_recent_thread_ids(self, max_results: int, days: int) -> List[str]:
+        return [thread['id'] for thread in self._list_recent_threads(max_results, days)]
+
     def get_thread_full(self, thread_id: str) -> Dict:
         """
         Get a specific thread by ID with full message content

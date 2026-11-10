@@ -1,4 +1,5 @@
 import React from 'react';
+import WorkspaceIcon from '../workspace/WorkspaceIcon';
 
 export default function EmailAccountsCard({
   user, selectedEmail, onSelectEmail, onAddEmail, addingEmail, addEmailError,
@@ -10,11 +11,11 @@ export default function EmailAccountsCard({
     <section className="card workspace-card" aria-labelledby="mailboxes-title">
       <div className="workspace-card-heading">
         <div>
-          <p className="workspace-eyebrow">ACCOUNTS</p>
+          <p className="workspace-eyebrow"><WorkspaceIcon name="mail" /> ACCOUNTS</p>
           <h2 id="mailboxes-title">Mailboxes</h2>
         </div>
         <button type="button" className="btn-secondary" onClick={onAddEmail} disabled={addingEmail}>
-          {addingEmail ? 'Connecting…' : '+ Add account'}
+          <WorkspaceIcon name="add" /> {addingEmail ? 'Connecting…' : 'Add account'}
         </button>
       </div>
       {accounts.length ? (

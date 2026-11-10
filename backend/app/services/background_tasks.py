@@ -4,9 +4,7 @@ Background Task for Email Sync and Embedding
 import asyncio
 from typing import Optional, Dict
 from datetime import datetime, timedelta
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from app.database import get_db
+from sqlalchemy import select
 from app.models import UserEmail, EmailEmbedding
 from app.services.gmail_service import GmailService
 from app.services.embedding_service import EmbeddingService
@@ -82,47 +80,28 @@ async def sync_and_embed_emails(user_id: int, email: Optional[str] = None, days:
             gmail_service = GmailService(creds)
             embedding_service = EmbeddingService()
             
-            # 3. Fetch recent threads (reduced from 20 to 5 for faster processing)
-            max_threads = 5 if not force else 20  # Process fewer threads on auto-sync
-            raw_threads = gmail_service.get_threads(max_results=max_threads, days=days)
-            print(f"Fetched {len(raw_threads)} threads for embedding")
+            # The Gmail list response contains the IDs needed for this check.
+            max_threads = 20 if force else 5
+            thread_ids = await asyncio.to_thread(gmail_service.get_recent_thread_ids, max_threads, days)
+            if not thread_ids:
+                return
 
-            # Quick check: count how many threads need embedding
-            thread_ids = [t['id'] for t in raw_threads]
-            if thread_ids:
-                existing_count_query = select(func.count()).select_from(
-                    select(EmailEmbedding.thread_id)
-                    .where(
-                        EmailEmbedding.user_id == user_id,
-                        EmailEmbedding.thread_id.in_(thread_ids)
-                    )
-                    .distinct()
-                    .subquery()
-                )
-                existing_count_result = await db.execute(existing_count_query)
-                existing_count = existing_count_result.scalar() or 0
-                
-                if existing_count >= len(thread_ids) and not force:
-                    print(f"All {len(thread_ids)} threads already embedded, skipping")
-                    return
+            existing = await db.scalars(
+                select(EmailEmbedding.thread_id).where(
+                    EmailEmbedding.user_id == user_id,
+                    EmailEmbedding.thread_id.in_(thread_ids),
+                ).distinct()
+            )
+            embedded_ids = set(existing)
 
             processed_count = 0
-            for raw_thread in raw_threads:
-                thread_id = raw_thread['id']
-                
-                # Check if we already have embeddings for this thread
-                check_query = select(EmailEmbedding).where(
-                    EmailEmbedding.user_id == user_id,
-                    EmailEmbedding.thread_id == thread_id
-                ).limit(1)
-                check_result = await db.execute(check_query)
-                if check_result.scalar_one_or_none():
-                    continue  # Skip already embedded threads
+            for thread_id in thread_ids:
+                if thread_id in embedded_ids:
+                    continue
 
-                # Get full thread content
-                full_thread = gmail_service.get_thread_full(thread_id)
+                full_thread = await asyncio.to_thread(gmail_service.get_thread_full, thread_id)
                 normalized = gmail_service.normalize_thread(full_thread)
-                
+
                 if not normalized or not normalized.get('messages'):
                     continue
 
@@ -133,28 +112,21 @@ async def sync_and_embed_emails(user_id: int, email: Optional[str] = None, days:
                     if not body or len(body.strip()) < 10:
                         continue
 
-                    # Chunk and embed (smaller chunks for faster processing)
-                    chunks = embedding_service.chunk_text(body, chunk_size=800, overlap=100)
-                    # Limit chunks per message to avoid too many embeddings
-                    chunks = chunks[:3]  # Max 3 chunks per message
-                    
-                    # Batch generate embeddings for better performance
-                    if chunks:
-                        vectors = embedding_service.get_embeddings(chunks)
-                        for chunk, vector in zip(chunks, vectors):
-                            new_embedding = EmailEmbedding(
-                                user_id=user_id,
-                                thread_id=thread_id,
-                                message_id=msg['message_id'],
-                                content=chunk,
-                                embedding=vector
-                            )
-                            db.add(new_embedding)
-                
+                    chunks = embedding_service.chunk_text(body, chunk_size=800, overlap=100, max_chunks=3)
+                    vectors = await asyncio.to_thread(embedding_service.get_embeddings, chunks)
+                    for chunk, vector in zip(chunks, vectors):
+                        db.add(EmailEmbedding(
+                            user_id=user_id,
+                            thread_id=thread_id,
+                            message_id=msg['message_id'],
+                            content=chunk,
+                            embedding=vector,
+                        ))
+
                 # Commit per thread to show progress and avoid long transactions
                 await db.commit()
                 processed_count += 1
-                print(f"Embedded thread {thread_id} ({processed_count}/{len(raw_threads)})")
+                print(f"Embedded thread {thread_id} ({processed_count}/{len(thread_ids)})")
 
             print(f"Background sync and embed completed for user {user_id} - processed {processed_count} threads")
 

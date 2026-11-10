@@ -1,34 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../services/api';
-import logo from '../assets/logo.png';
 import './Login.css';
 
 function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const navigate = useNavigate();
-
-  const checkAuth = async () => {
-    try {
-      const response = await api.get('/auth/me');
-      if (response.data.authenticated) {
-        navigate('/dashboard');
-      }
-    } catch (error) {
-      // Not authenticated, stay on login page
-      // Only log if it's not a network error (backend might not be running)
-      if (error.response) {
-        console.log('Not authenticated');
-      }
-    }
-  };
-
-  useEffect(() => {
-    // Check if user is already authenticated
-    checkAuth();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const handleGoogleLogin = async () => {
     try {
@@ -50,7 +27,7 @@ function Login() {
     <div className="login-container">
       <div className="login-card">
         <img 
-          src={logo} 
+          src={`${process.env.PUBLIC_URL}/signal-mark.svg`}
           alt="Email Agent Logo" 
           style={{ 
             width: '80px', 

@@ -1,3 +1,4 @@
+import WorkspaceIcon from '../workspace/WorkspaceIcon';
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useNavigate } from 'react-router-dom';
@@ -473,8 +474,8 @@ function AssistChatPanel({ onClose, selectedEmail }) {
       <div className="thread-chat-resizer" onMouseDown={handleMouseDown} />
       <div className="thread-chat-header">
         <div className="thread-chat-title">
-          <span className="chat-icon">🤖</span>
-          <span>Assist Chat</span>
+          <WorkspaceIcon name="spark" className="chat-icon" />
+          <span>Inbox Copilot</span>
         </div>
         <div className="thread-chat-actions">
           <button
@@ -482,7 +483,7 @@ function AssistChatPanel({ onClose, selectedEmail }) {
             onClick={() => setShowSessionList(!showSessionList)}
             title="Session history"
           >
-            📚
+            <WorkspaceIcon name="history" />
           </button>
           {messages.length > 0 && (
             <button
@@ -490,7 +491,7 @@ function AssistChatPanel({ onClose, selectedEmail }) {
               onClick={handleClearHistory}
               title="Clear conversation"
             >
-              🗑️
+              <WorkspaceIcon name="trash" />
             </button>
           )}
           <button
@@ -498,10 +499,10 @@ function AssistChatPanel({ onClose, selectedEmail }) {
             onClick={() => setIsMinimized(!isMinimized)}
             title={isMinimized ? 'Expand' : 'Minimize'}
           >
-            {isMinimized ? '▲' : '▼'}
+            <WorkspaceIcon name="chevron" className={isMinimized ? 'workspace-rotated' : ''} />
           </button>
           <button className="chat-action-btn" onClick={onClose} title="Close">
-            ×
+            <WorkspaceIcon name="close" />
           </button>
         </div>
       </div>
@@ -737,8 +738,9 @@ function AssistChatPanel({ onClose, selectedEmail }) {
                 className="send-button"
                 onClick={handleSend}
                 disabled={!input.trim() || loading}
+                aria-label="Send message"
               >
-                {loading ? '...' : '→'}
+                {loading ? '…' : <WorkspaceIcon name="send" />}
               </button>
             </div>
           </div>

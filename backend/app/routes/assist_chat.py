@@ -14,7 +14,6 @@ from sqlalchemy import select
 from app.database import get_db
 from app.routes.auth import get_user_credentials, get_current_user_id
 from app.services.gmail_service import GmailService
-from app.agents.assist_chat_agent import AssistChatAgent
 from app.models import UserEmail, AssistChatSession
 
 router = APIRouter()
@@ -105,6 +104,8 @@ async def stream_chat_response(
             primary_gmail_service = gmail_services.get(primary_email)
         
         # Initialize agent with all Gmail services
+        from app.agents.assist_chat_agent import AssistChatAgent
+
         agent = AssistChatAgent(
             db=db,
             user_id=user_id,

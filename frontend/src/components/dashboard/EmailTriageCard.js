@@ -1,4 +1,5 @@
 import React from 'react';
+import WorkspaceIcon from '../workspace/WorkspaceIcon';
 import { Link, useLocation } from 'react-router-dom';
 
 export default function EmailTriageCard({
@@ -13,11 +14,11 @@ export default function EmailTriageCard({
   return (
     <section id="priority-inbox" className="card workspace-card priority-card" aria-labelledby="priorities-title">
       <div className="workspace-card-heading">
-        <div><p className="workspace-eyebrow">NEEDS ATTENTION</p><h2 id="priorities-title">Priority inbox</h2></div>
-        {!isStandalonePage && <Link className="workspace-link" to="/triage">See all <span aria-hidden="true">↗</span></Link>}
+        <div><p className="workspace-eyebrow"><WorkspaceIcon name="priority" /> NEEDS ATTENTION</p><h2 id="priorities-title">Priority inbox</h2></div>
+        {!isStandalonePage && <Link className="workspace-link" to="/triage">See all <WorkspaceIcon name="arrow" /></Link>}
       </div>
       <div className="workspace-toolbar priority-toolbar">
-        <button type="button" className="btn-primary" onClick={onRunTriage} disabled={busy}>{runningTriage ? 'Scanning…' : 'Run triage'}</button>
+        <button type="button" className="btn-primary" onClick={onRunTriage} disabled={busy}><WorkspaceIcon name={runningTriage ? 'refresh' : 'priority'} className={runningTriage ? 'workspace-spinning' : ''} /> {runningTriage ? 'Scanning…' : 'Run triage'}</button>
         <label className="workspace-filter">
           <span className="workspace-sr-only">Priority date range</span>
           <select value={daysFilter ?? ''} onChange={event => onDaysFilterChange(event.target.value ? Number(event.target.value) : null)}>
@@ -51,7 +52,7 @@ export default function EmailTriageCard({
               <article className="priority-item">
                 <div className="priority-badges"><span className={score >= 80 ? 'priority-tag urgent' : 'priority-tag'}>{result.label || 'Review'}</span><span>{score}% priority</span></div>
                 <button type="button" className="priority-open" disabled={!result.thread_id} onClick={() => onOpenThread(result.thread_id, result.email)}>
-                  {result.subject || result.summary || 'Open conversation'} <span aria-hidden="true">↗</span>
+                  {result.subject || result.summary || 'Open conversation'} <WorkspaceIcon name="arrow" />
                 </button>
                 {result.subject && result.summary && <p>{result.summary}</p>}
                 {result.key_points?.length > 0 && <details className="priority-points"><summary>Key points</summary><ul>{result.key_points.map((point, i) => <li key={i}>{point}</li>)}</ul></details>}

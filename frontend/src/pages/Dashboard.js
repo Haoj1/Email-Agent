@@ -6,6 +6,8 @@ import EmailAccountsCard from '../components/dashboard/EmailAccountsCard';
 import AssistChatCard from '../components/dashboard/AssistChatCard';
 import EmailThreadsCard from '../components/dashboard/EmailThreadsCard';
 import EmailTriageCard from '../components/dashboard/EmailTriageCard';
+import InboxSignal from '../components/workspace/InboxSignal';
+import WorkspaceIcon from '../components/workspace/WorkspaceIcon';
 import './Dashboard.css';
 
 const SuggestedScheduleCard = lazy(() => import('../components/dashboard/SuggestedScheduleCard'));
@@ -394,20 +396,25 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   return (
     <div className="dashboard-container">
       <div className="dashboard-content workspace-dashboard">
+        <div className="workspace-topline">
+          <span><WorkspaceIcon name="overview" /> Workspace <span aria-hidden="true">/</span> Overview</span>
+          <span className="workspace-connection"><i aria-hidden="true" /> {user?.emails?.length ? 'Mailboxes connected' : 'No connected mailboxes'}</span>
+        </div>
         <header className="workspace-intro">
-          <div>
+          <div className="workspace-intro-copy">
             <p className="workspace-eyebrow">INBOX WORKSPACE</p>
             <h1>Inbox overview</h1>
             <p>See what needs a reply, find related conversations, and plan your follow-ups.</p>
             <div className="workspace-intro-actions">
-              <a className="btn-primary" href="#priority-inbox">Review priorities</a>
-              <button type="button" className="btn-secondary" onClick={() => setShowAssistChat(true)}>Ask Copilot</button>
+              <a className="btn-primary" href="#priority-inbox"><WorkspaceIcon name="priority" /> Review priorities</a>
+              <button type="button" className="btn-secondary" onClick={() => setShowAssistChat(true)}><WorkspaceIcon name="spark" /> Ask Copilot</button>
               <button type="button" className="workspace-quiet" onClick={() => { setShowOnboarding(true); setOnboardingStep(1); }}>Guide</button>
             </div>
           </div>
+          <InboxSignal />
           <div className="workspace-intro-summary" aria-label="Workspace status">
-            <div><strong>{checkingPending ? '…' : pendingTriageCount}</strong><span>Awaiting triage</span></div>
-            <div><strong>{user?.emails?.length ?? 0}</strong><span>Connected mailboxes</span></div>
+            <div><WorkspaceIcon name="priority" /><strong>{checkingPending ? '…' : pendingTriageCount}</strong><span>Awaiting triage</span></div>
+            <div><WorkspaceIcon name="mail" /><strong>{user?.emails?.length ?? 0}</strong><span>Connected mailboxes</span></div>
           </div>
         </header>
         <div
@@ -558,7 +565,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
           }`}
         >
           <section className="card workspace-card workspace-tool-card">
-            <div><p className="workspace-eyebrow">FOLLOW-UPS</p><h2>Suggested schedule</h2><p>Review email follow-ups before adding them to your calendar.</p></div>
+            <div><p className="workspace-eyebrow"><WorkspaceIcon name="calendar" /> FOLLOW-UPS</p><h2>Suggested schedule</h2><p>Review email follow-ups before adding them to your calendar.</p></div>
             <button type="button" className="btn-secondary" aria-expanded={Boolean(scheduleVisible)} onClick={() => setShowSchedule(!scheduleVisible)}>
               {scheduleVisible ? 'Hide schedule' : 'Open schedule'}
             </button>

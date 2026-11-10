@@ -1,11 +1,11 @@
 import React from 'react';
 import { Link, NavLink } from 'react-router-dom';
-import logo from '../../assets/logo.png';
+import WorkspaceIcon from '../workspace/WorkspaceIcon';
 
 const pages = [
-  { path: '/dashboard', number: '01', label: 'Overview' },
-  { path: '/threads', number: '02', label: 'Conversations' },
-  { path: '/triage', number: '03', label: 'Priority inbox' },
+  { path: '/dashboard', icon: 'overview', label: 'Overview' },
+  { path: '/threads', icon: 'mail', label: 'Conversations' },
+  { path: '/triage', icon: 'priority', label: 'Priority inbox' },
 ];
 
 export default function Navigation({ user, selectedEmail, onSelectEmail, onLogout }) {
@@ -16,13 +16,14 @@ export default function Navigation({ user, selectedEmail, onSelectEmail, onLogou
   return (
     <aside className="workspace-sidebar">
       <Link to="/dashboard" className="workspace-brand">
-        <img src={logo} alt="" />
+        <img src={`${process.env.PUBLIC_URL}/signal-mark.svg`} alt="" />
         <span><strong>Email Agent</strong><small>INBOX WORKSPACE</small></span>
       </Link>
       <nav className="workspace-nav" aria-label="Workspace navigation">
-        {pages.map(({ path, number, label }) => (
+        <p className="workspace-nav-label">WORKSPACE</p>
+        {pages.map(({ path, icon, label }) => (
           <NavLink key={path} to={path}>
-            <span aria-hidden="true">{number}</span>{label}
+            <WorkspaceIcon name={icon} />{label}
           </NavLink>
         ))}
       </nav>
@@ -37,7 +38,7 @@ export default function Navigation({ user, selectedEmail, onSelectEmail, onLogou
             </select>
           </label>
         ) : current && <span className="workspace-account-single" title={current}>{current}</span>}
-        <button type="button" className="workspace-logout" onClick={onLogout}>Sign out</button>
+        <button type="button" className="workspace-logout" onClick={onLogout}><WorkspaceIcon name="logout" /> Sign out</button>
       </div>
     </aside>
   );
