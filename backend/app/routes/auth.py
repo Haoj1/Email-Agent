@@ -1,11 +1,12 @@
 import os
+import secrets
 # Allow insecure transport in development (localhost only)
 # This MUST be set before importing oauthlib-related modules
 # This is required for OAuth2 to work with HTTP in local development
 # We'll check the environment after importing settings
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'  # Set by default for development
 
-from fastapi import APIRouter, Request, HTTPException, Depends, Query, BackgroundTasks
+from fastapi import APIRouter, Request, Response, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -13,8 +14,10 @@ from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from jose import JWTError, jwt
 from typing import Optional
+from urllib.parse import urlencode
 import httpx
 import re
 from app.config import settings, GOOGLE_SCOPES
@@ -32,6 +35,9 @@ router = APIRouter()
 # In-memory session storage (will be replaced with database later)
 # Format: {session_id: {email: str, tokens: dict}}
 user_sessions = {}
+OAUTH_STATE_COOKIE = "email_agent_oauth_state"
+OAUTH_COOKIE_PATH = "/api/auth/google"
+OAUTH_STATE_SECONDS = 600
 
 def get_session_id(request: Request) -> str:
     """Get or create session ID from cookie"""
@@ -43,19 +49,32 @@ def get_session_id(request: Request) -> str:
 
 @router.get("/google/login")
 async def google_login(
+    request: Request,
+    response: Response,
     action: Optional[str] = Query(None, description="Action: 'login' or 'add_email'"),
-    user_id: Optional[int] = Query(None, description="User ID (required for add_email)")
+    user_id: Optional[int] = Query(None, description="Expected user ID for add_email"),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Initiate Google OAuth login flow
     
     - action='login': Normal login (create new user or login existing)
-    - action='add_email': Add email to existing user (requires user_id)
+    - action='add_email': Add email to the authenticated user
     """
+    if action not in (None, "login", "add_email"):
+        raise HTTPException(status_code=400, detail="Unknown OAuth action")
+    state_data = {
+        "action": action or "login",
+        "jti": secrets.token_urlsafe(24),
+        "exp": datetime.now(timezone.utc) + timedelta(seconds=OAUTH_STATE_SECONDS),
+    }
+    if action == "add_email":
+        current_user_id = await get_current_user_id(request, db)
+        if user_id is not None and user_id != current_user_id:
+            raise HTTPException(status_code=403, detail="Email account belongs to another user")
+        state_data["user_id"] = current_user_id
+
     try:
-        if action == "add_email" and not user_id:
-            raise HTTPException(status_code=400, detail="user_id is required for add_email action")
-        
         flow = Flow.from_client_config(
             {
                 "web": {
@@ -70,14 +89,7 @@ async def google_login(
         )
         flow.redirect_uri = settings.GOOGLE_REDIRECT_URI
         
-        # Include action and user_id in state for callback
-        state_data = {"action": action or "login"}
-        if user_id:
-            state_data["user_id"] = user_id
-        
-        import json
-        import base64
-        state_encoded = base64.b64encode(json.dumps(state_data).encode()).decode()
+        state_encoded = jwt.encode(state_data, settings.SESSION_SECRET, algorithm="HS256")
         
         authorization_url, _ = flow.authorization_url(
             access_type='offline',
@@ -85,11 +97,23 @@ async def google_login(
             prompt='consent',  # Force consent screen to get refresh token
             state=state_encoded
         )
+        response.set_cookie(
+            OAUTH_STATE_COOKIE, state_encoded, max_age=OAUTH_STATE_SECONDS,
+            httponly=True, secure=settings.GOOGLE_REDIRECT_URI.startswith("https://"),
+            samesite="lax", path=OAUTH_COOKIE_PATH,
+        )
         
         return {"authUrl": authorization_url, "state": state_encoded}
     except Exception as e:
-        print(f"Error generating auth URL: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate auth URL: {str(e)}")
+        print(f"Error generating auth URL: {type(e).__name__}")
+        raise HTTPException(status_code=500, detail="Failed to generate auth URL")
+
+
+def oauth_error(message: str):
+    params = urlencode({"success": "false", "error": message})
+    response = RedirectResponse(url=f"{settings.FRONTEND_URL}/auth/callback?{params}")
+    response.delete_cookie(OAUTH_STATE_COOKIE, path=OAUTH_COOKIE_PATH)
+    return response
 
 @router.get("/google/callback")
 async def google_callback(
@@ -102,27 +126,21 @@ async def google_callback(
     Handle Google OAuth callback
     Supports both login and add_email actions
     """
-    if not code:
-        error = request.query_params.get("error", "Authorization code not provided")
-        return RedirectResponse(
-            url=f"{settings.FRONTEND_URL}/auth/callback?success=false&error={error}"
-        )
-    
-    # Parse state to get action and user_id
-    action = "login"
-    user_id = None
-    if state:
-        try:
-            import json
-            import base64
-            state_data = json.loads(base64.b64decode(state).decode())
-            action = state_data.get("action", "login")
-            user_id = state_data.get("user_id")
-        except Exception as e:
-            print(f"Error parsing state: {e}, defaulting to login")
-    
+    cookie = request.cookies.get(OAUTH_STATE_COOKIE)
+    if not state or not cookie or not secrets.compare_digest(cookie.encode(), state.encode()):
+        return oauth_error("Invalid sign-in state. Start sign-in again.")
     try:
-        print(f"Starting OAuth callback with code: {code[:20]}...")
+        state_data = jwt.decode(state, settings.SESSION_SECRET, algorithms=["HS256"], options={"require_exp": True})
+    except JWTError:
+        return oauth_error("Sign-in expired. Start sign-in again.")
+    if not code:
+        return oauth_error(request.query_params.get("error", "Authorization code not provided"))
+
+    action = state_data.get("action")
+    user_id = state_data.get("user_id")
+    try:
+        if action == "add_email" and await get_current_user_id(request, db) != user_id:
+            raise HTTPException(status_code=403, detail="The active user changed. Start sign-in again.")
         flow = Flow.from_client_config(
             {
                 "web": {
@@ -140,7 +158,6 @@ async def google_callback(
         # Exchange code for tokens
         # Use code parameter directly to avoid scope validation issues
         print("Fetching token...")
-        print(f"Using authorization code: {code[:20]}...")
         
         # Fetch token using code directly - this avoids scope validation warnings
         # Google may add 'openid' scope automatically, which is fine
@@ -153,7 +170,7 @@ async def google_callback(
                 flow.fetch_token(code=code)
             except Exception as e:
                 # If that fails, try with full URL
-                print(f"Direct code fetch failed: {e}, trying with full URL...")
+                print(f"Direct token exchange failed: {type(e).__name__}")
                 authorization_response = str(request.url)
                 flow.fetch_token(authorization_response=authorization_response)
         
@@ -200,7 +217,6 @@ async def google_callback(
                 detail="Failed to obtain access token"
             )
         
-        print(f"Token obtained: {credentials.token[:30] if credentials.token else 'None'}...")
         print(f"Token scopes: {credentials.scopes}")
         print(f"Token expired: {credentials.expired if hasattr(credentials, 'expired') else 'N/A'}")
         
@@ -235,28 +251,20 @@ async def google_callback(
         
         # Handle based on action
         if action == "add_email" and user_id:
-            # Add email to existing user
-            return await handle_add_email(db, user_id, user_email, credentials, request)
+            result = await handle_add_email(db, user_id, user_email, credentials, request)
         else:
-            # Login or create new user
-            return await handle_login(db, user_email, credentials, request)
+            result = await handle_login(db, user_email, credentials, request)
+        result.delete_cookie(OAUTH_STATE_COOKIE, path=OAUTH_COOKIE_PATH)
+        return result
         
     except HTTPException as e:
         # HTTPException should be re-raised, not caught
         print(f"HTTPException in OAuth callback: {e.status_code} - {e.detail}")
         error_msg = e.detail if e.detail else f"HTTP {e.status_code} error"
-        return RedirectResponse(
-            url=f"{settings.FRONTEND_URL}/auth/callback?success=false&error={error_msg}"
-        )
+        return oauth_error(error_msg)
     except Exception as e:
-        import traceback
-        error_trace = traceback.format_exc()
-        print(f"Error in OAuth callback: {type(e).__name__}: {str(e)}")
-        print(f"Traceback: {error_trace}")
-        error_msg = str(e) if str(e) else f"{type(e).__name__} occurred"
-        return RedirectResponse(
-            url=f"{settings.FRONTEND_URL}/auth/callback?success=false&error={error_msg}"
-        )
+        print(f"Error in OAuth callback: {type(e).__name__}")
+        return oauth_error("Google sign-in failed. Try again.")
 
 @router.get("/me")
 async def get_current_user(

@@ -299,6 +299,8 @@ async def list_sessions(
             "success": True,
             "sessions": session_list
         }
+    except HTTPException:
+        raise
     except Exception as e:
         error_str = str(e)
         print(f"Error listing sessions: {e}")

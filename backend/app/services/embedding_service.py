@@ -2,16 +2,16 @@
 Embedding Service
 Handles local text embedding generation using sentence-transformers
 """
-from typing import List, Union
-import numpy as np
-from sentence_transformers import SentenceTransformer
 import os
+from threading import Lock
+from typing import List
 
 class EmbeddingService:
     """Service for generating embeddings using local models"""
     
     _instance = None
     _model = None
+    _model_lock = Lock()
     
     def __new__(cls):
         if cls._instance is None:
@@ -19,12 +19,13 @@ class EmbeddingService:
         return cls._instance
     
     def __init__(self):
-        # We use __init__ but ensure model is only loaded once
         if EmbeddingService._model is None:
-            model_name = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
-            print(f"Loading local embedding model: {model_name}...")
-            EmbeddingService._model = SentenceTransformer(model_name)
-            print("Model loaded successfully.")
+            with EmbeddingService._model_lock:
+                if EmbeddingService._model is None:
+                    from sentence_transformers import SentenceTransformer
+
+                    model_name = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
+                    EmbeddingService._model = SentenceTransformer(model_name)
 
     def get_embedding(self, text: str) -> List[float]:
         """Generate embedding for a single string"""

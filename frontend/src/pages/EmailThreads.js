@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEmailCache } from '../contexts/EmailCacheContext';
 import { api } from '../services/api';
@@ -8,6 +8,8 @@ import './Dashboard.css';
 function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
   const [emailThreads, setEmailThreads] = useState(null);
   const [loadingThreads, setLoadingThreads] = useState(false);
+  const threadsRequest = useRef(null);
+  useEffect(() => () => threadsRequest.current?.controller.abort(), []);
   const [emailThreadsNextPageToken, setEmailThreadsNextPageToken] = useState(null);
   const [daysFilter, setDaysFilter] = useState(14); // Default to 14 days
   const [searchQuery, setSearchQuery] = useState('');
@@ -30,18 +32,25 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
     query = searchQuery
   ) => {
     const trimmedQuery = (query || '').trim();
+    const previous = threadsRequest.current;
+    previous?.controller.abort();
+    const controller = new AbortController();
+    threadsRequest.current = { email, controller };
+
 
     if (!forceRefresh && !isLoadMore && !trimmedQuery) {
       const cached = getCachedThreads(email);
       // Only use cache if it matches current days filter
       if (cached && cached.days === days) {
+        setLoadingThreads(false);
         setEmailThreads(cached);
+        setEmailThreadsNextPageToken(cached.data?.next_page_token || null);
         return;
       }
     }
 
     setLoadingThreads(true);
-    if (forceRefresh && !isLoadMore) {
+    if (!isLoadMore && (forceRefresh || previous?.email !== email)) {
       setEmailThreads(null);
       setEmailThreadsNextPageToken(null);
     }
@@ -54,7 +63,8 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
         params.page_token = emailThreadsNextPageToken;
       }
 
-      const response = await api.get('/gmail/threads', { params });
+      const response = await api.get('/gmail/threads', { params, signal: controller.signal });
+      if (controller.signal.aborted) return;
       const newData = response.data;
       
       let mergedThreads = newData.threads || [];
@@ -70,14 +80,15 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
       
       setEmailThreads(threadsData);
       setEmailThreadsNextPageToken(newData.next_page_token || null);
-      if (!isLoadMore) setCachedThreads(email, threadsData);
+      if (!isLoadMore && !trimmedQuery) setCachedThreads(email, threadsData);
     } catch (error) {
+      if (controller.signal.aborted) return;
       setEmailThreads({
         success: false,
         error: error.response?.data?.detail || error.message,
       });
     } finally {
-      setLoadingThreads(false);
+      if (!controller.signal.aborted) setLoadingThreads(false);
     }
   };
 

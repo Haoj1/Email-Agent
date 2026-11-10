@@ -1,42 +1,41 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
+import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../services/api';
-import ThreadChatPanel from '../components/thread/ThreadChatPanel';
+import { useEmailCache } from '../contexts/EmailCacheContext';
+import { findRelatedThreads } from '../utils/relatedThreads';
 import './ThreadDetail.css';
 
-function ThreadDetail() {
+const ThreadChatPanel = lazy(() => import('../components/thread/ThreadChatPanel'));
+
+function ThreadDetail({ primaryEmail }) {
   const { threadId } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const email = searchParams.get('email'); // 从 URL 参数获取邮箱
+  const email = searchParams.get('email');
+  const { getCachedThreads } = useEmailCache();
 
   const [thread, setThread] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [showChat, setShowChat] = useState(false);
+  const [showChat, setShowChat] = useState(null);
 
   useEffect(() => {
-    loadThreadDetail();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId, email]);
-
-  const loadThreadDetail = async () => {
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
-    try {
-      const params = email ? { email } : {};
-      const response = await api.get(`/gmail/threads/${threadId}`, { params });
-      setThread(response.data);
-      // Update email from thread response if available (thread's actual email account)
-      if (response.data.email_account && response.data.email_account !== email) {
-        // Thread belongs to a different email account, but we'll use the one from response
-      }
-    } catch (err) {
-      setError(err.response?.data?.detail || err.message || 'Failed to load thread');
-    } finally {
-      setLoading(false);
-    }
-  };
+    setShowChat(null);
+    api.get(`/gmail/threads/${threadId}`, { params: email ? { email } : {}, signal: controller.signal })
+      .then(response => {
+        if (!controller.signal.aborted) setThread(response.data);
+      })
+      .catch(err => {
+        if (!controller.signal.aborted) setError(err.response?.data?.detail || err.message || 'Failed to load thread');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [threadId, email]);
 
   const formatDate = (dateString) => {
     try {
@@ -97,6 +96,10 @@ function ThreadDetail() {
 
   const firstMessage = thread.messages[0];
   const subject = firstMessage.subject || '(No Subject)';
+  const cachedMailbox = getCachedThreads(email) || (email === primaryEmail ? getCachedThreads(null) : null);
+  const cached = cachedMailbox?.data?.threads || [];
+  const related = findRelatedThreads(cached, { thread_id: threadId, subject: firstMessage.subject, from: firstMessage.from });
+  const relatedSearch = email ? `?${new URLSearchParams({ email })}` : '';
 
   return (
     <div className="thread-detail-container">
@@ -123,11 +126,22 @@ function ThreadDetail() {
             onClick={() => setShowChat(!showChat)}
             title={showChat ? 'Close Chat' : 'Open Chat'}
           >
-            {showChat ? '✕' : '💬'} Chat
+            {showChat ? 'Close assistant' : 'Ask about this thread'}
           </button>
         </div>
       </div>
 
+      {related.length > 0 && (
+        <section className="workspace-related" aria-labelledby="related-title">
+          <p className="workspace-eyebrow">THREAD CONTEXT</p>
+          <h2 id="related-title">Related conversations</h2>
+          <ul>{related.map(({ thread: item, reason }) => (
+            <li key={item.thread_id}>
+              <Link to={`/thread/${encodeURIComponent(item.thread_id)}${relatedSearch}`}><strong>{item.subject}</strong><small>{reason}</small></Link>
+            </li>
+          ))}</ul>
+        </section>
+      )}
       <div className="thread-content">
         {thread.messages.map((message, index) => {
           const emailAddress = formatEmailAddress(message.from);
@@ -194,14 +208,14 @@ function ThreadDetail() {
         })}
       </div>
 
-      <div className={`thread-chat-wrapper ${showChat ? 'open' : ''}`}>
-        <ThreadChatPanel
-          threadId={threadId}
-          email={thread?.email_account || email}
-          onClose={() => setShowChat(false)}
-        />
-        <div className="thread-chat-overlay" onClick={() => setShowChat(false)} />
-      </div>
+      {showChat !== null && (
+        <div className={`thread-chat-wrapper ${showChat ? 'open' : ''}`} hidden={!showChat}>
+          <Suspense fallback={<p className="workspace-panel-loading" role="status">Loading assistant…</p>}>
+            <ThreadChatPanel threadId={threadId} email={thread.email_account || email} onClose={() => setShowChat(false)} />
+          </Suspense>
+          <div className="thread-chat-overlay" onClick={() => setShowChat(false)} />
+        </div>
+      )}
     </div>
   );
 }

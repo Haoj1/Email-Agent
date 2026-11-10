@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useEmailCache } from '../contexts/EmailCacheContext';
 import { api } from '../services/api';
@@ -6,9 +6,10 @@ import EmailAccountsCard from '../components/dashboard/EmailAccountsCard';
 import AssistChatCard from '../components/dashboard/AssistChatCard';
 import EmailThreadsCard from '../components/dashboard/EmailThreadsCard';
 import EmailTriageCard from '../components/dashboard/EmailTriageCard';
-import SuggestedScheduleCard from '../components/dashboard/SuggestedScheduleCard';
-import AssistChatPanel from '../components/assist/AssistChatPanel';
 import './Dashboard.css';
+
+const SuggestedScheduleCard = lazy(() => import('../components/dashboard/SuggestedScheduleCard'));
+const AssistChatPanel = lazy(() => import('../components/assist/AssistChatPanel'));
 
 function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   const { 
@@ -26,6 +27,8 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   } = useEmailCache();
   const [emailThreads, setEmailThreads] = useState(null);
   const [loadingThreads, setLoadingThreads] = useState(false);
+  const threadsRequest = useRef(null);
+  useEffect(() => () => threadsRequest.current?.controller.abort(), []);
   const [emailThreadsNextPageToken, setEmailThreadsNextPageToken] = useState(null);
   const [triageResults, setTriageResults] = useState(null);
   const [triagePage, setTriagePage] = useState(0);
@@ -38,7 +41,8 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   
   const [addingEmail, setAddingEmail] = useState(false);
   const [addEmailError, setAddEmailError] = useState(null);
-  const [showAssistChat, setShowAssistChat] = useState(false);
+  const [showAssistChat, setShowAssistChat] = useState(null);
+  const [showSchedule, setShowSchedule] = useState(null);
   const [onboardingStep, setOnboardingStep] = useState(0); // 0 = inactive, 1..N = steps
   const [showOnboarding, setShowOnboarding] = useState(false);
   const onboardingAccountsRef = useRef(null);
@@ -65,17 +69,6 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
       }, 500);
     }
 
-    // Always open Inbox Copilot on Dashboard when logged in
-    if (user && user.authenticated) {
-      setShowAssistChat(true);
-
-      // New user onboarding: only if not completed before
-      const onboardingKey = 'emailAgent_onboarding_completed';
-      if (!localStorage.getItem(onboardingKey)) {
-        setShowOnboarding(true);
-        setOnboardingStep(1);
-      }
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
@@ -120,19 +113,26 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   }, []);
 
 
-  const loadEmailThreads = async (email = null, forceRefresh = false, isLoadMore = false, days = 14) => {
-    const trimmedQuery = (threadsSearchQuery || '').trim();
+  const loadEmailThreads = async (email = null, forceRefresh = false, isLoadMore = false, days = 14, query = threadsSearchQuery) => {
+    const trimmedQuery = (query || '').trim();
+    const previous = threadsRequest.current;
+    previous?.controller.abort();
+    const controller = new AbortController();
+    threadsRequest.current = { email, controller };
+
 
     if (!forceRefresh && !isLoadMore && !trimmedQuery) {
       const cached = getCachedThreads(email);
       if (cached && cached.days === days) {
+        setLoadingThreads(false);
         setEmailThreads(cached);
+        setEmailThreadsNextPageToken(cached.data?.next_page_token || null);
         return;
       }
     }
 
     setLoadingThreads(true);
-    if (forceRefresh && !isLoadMore) {
+    if (!isLoadMore && (forceRefresh || previous?.email !== email)) {
       setEmailThreads(null);
       setEmailThreadsNextPageToken(null);
     }
@@ -145,7 +145,8 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
         params.page_token = emailThreadsNextPageToken;
       }
 
-      const response = await api.get('/gmail/threads', { params });
+      const response = await api.get('/gmail/threads', { params, signal: controller.signal });
+      if (controller.signal.aborted) return;
       const newData = response.data;
       
       let mergedThreads = newData.threads || [];
@@ -161,14 +162,15 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
       
       setEmailThreads(threadsData);
       setEmailThreadsNextPageToken(newData.next_page_token || null);
-      if (!isLoadMore) setCachedThreads(email, threadsData);
+      if (!isLoadMore && !trimmedQuery) setCachedThreads(email, threadsData);
     } catch (error) {
+      if (controller.signal.aborted) return;
       setEmailThreads({
         success: false,
         error: error.response?.data?.detail || error.message,
       });
     } finally {
-      setLoadingThreads(false);
+      if (!controller.signal.aborted) setLoadingThreads(false);
     }
   };
 
@@ -317,9 +319,9 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, selectedEmail]);
 
-  const handleOpenThread = (threadId) => {
+  const handleOpenThread = (threadId, account = selectedEmail) => {
     const params = new URLSearchParams();
-    if (selectedEmail) params.set('email', selectedEmail);
+    if (account) params.set('email', account);
     navigate(`/thread/${threadId}?${params.toString()}`);
   };
 
@@ -361,7 +363,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
 
   const handleThreadsClearSearch = () => {
     setThreadsSearchQuery('');
-    loadEmailThreads(selectedEmail, true, false, emailThreads?.days || 14);
+    loadEmailThreads(selectedEmail, true, false, emailThreads?.days || 14, '');
   };
 
   const completeOnboarding = () => {
@@ -387,12 +389,30 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     completeOnboarding();
   };
 
+  const scheduleVisible = showSchedule || (showOnboarding && onboardingStep === 5);
+
   return (
     <div className="dashboard-container">
-      <div className="dashboard-content">
+      <div className="dashboard-content workspace-dashboard">
+        <header className="workspace-intro">
+          <div>
+            <p className="workspace-eyebrow">INBOX WORKSPACE</p>
+            <h1>Inbox overview</h1>
+            <p>See what needs a reply, find related conversations, and plan your follow-ups.</p>
+            <div className="workspace-intro-actions">
+              <a className="btn-primary" href="#priority-inbox">Review priorities</a>
+              <button type="button" className="btn-secondary" onClick={() => setShowAssistChat(true)}>Ask Copilot</button>
+              <button type="button" className="workspace-quiet" onClick={() => { setShowOnboarding(true); setOnboardingStep(1); }}>Guide</button>
+            </div>
+          </div>
+          <div className="workspace-intro-summary" aria-label="Workspace status">
+            <div><strong>{checkingPending ? '…' : pendingTriageCount}</strong><span>Awaiting triage</span></div>
+            <div><strong>{user?.emails?.length ?? 0}</strong><span>Connected mailboxes</span></div>
+          </div>
+        </header>
         <div
           ref={onboardingAccountsRef}
-          className={`onboarding-section ${
+          className={`onboarding-section workspace-accounts ${
             showOnboarding && onboardingStep === 1 ? 'onboarding-active' : ''
           }`}
         >
@@ -424,7 +444,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
 
         <div
           ref={onboardingCopilotRef}
-          className={`onboarding-section ${
+          className={`onboarding-section workspace-copilot ${
             showOnboarding && onboardingStep === 4 ? 'onboarding-active' : ''
           }`}
         >
@@ -450,7 +470,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
 
         <div
           ref={onboardingConversationsRef}
-          className={`onboarding-section ${
+          className={`onboarding-section workspace-conversations ${
             showOnboarding && onboardingStep === 2 ? 'onboarding-active' : ''
           }`}
         >
@@ -491,7 +511,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
 
         <div
           ref={onboardingPriorityRef}
-          className={`onboarding-section ${
+          className={`onboarding-section workspace-priority ${
             showOnboarding && onboardingStep === 3 ? 'onboarding-active' : ''
           }`}
         >
@@ -533,11 +553,23 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
 
         <div
           ref={onboardingCalendarRef}
-          className={`dashboard-grid-span-full onboarding-section ${
+          className={`onboarding-section workspace-schedule ${
             showOnboarding && onboardingStep === 5 ? 'onboarding-active' : ''
           }`}
         >
-          <SuggestedScheduleCard selectedEmail={selectedEmail} />
+          <section className="card workspace-card workspace-tool-card">
+            <div><p className="workspace-eyebrow">FOLLOW-UPS</p><h2>Suggested schedule</h2><p>Review email follow-ups before adding them to your calendar.</p></div>
+            <button type="button" className="btn-secondary" aria-expanded={Boolean(scheduleVisible)} onClick={() => setShowSchedule(!scheduleVisible)}>
+              {scheduleVisible ? 'Hide schedule' : 'Open schedule'}
+            </button>
+          </section>
+          {(showSchedule !== null || scheduleVisible) && (
+            <div hidden={!scheduleVisible} className="workspace-schedule-panel">
+              <Suspense fallback={<p className="workspace-empty" role="status">Loading schedule…</p>}>
+                <SuggestedScheduleCard selectedEmail={selectedEmail} />
+              </Suspense>
+            </div>
+          )}
           {showOnboarding && onboardingStep === 5 && (
             <div className="onboarding-tooltip">
               <h3 className="onboarding-title">Suggested Schedule</h3>
@@ -588,22 +620,13 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
           <p>&copy; {new Date().getFullYear()} Email Agent. All rights reserved.</p>
         </div>
       </footer>
-      <button
-        type="button"
-        className="dashboard-help-button"
-        onClick={() => {
-          setShowOnboarding(true);
-          setOnboardingStep(1);
-        }}
-      >
-        ?
-      </button>
-      <div className={`thread-chat-wrapper ${showAssistChat ? 'open' : ''}`}>
-        <AssistChatPanel
-          onClose={() => setShowAssistChat(false)}
-          selectedEmail={selectedEmail}
-        />
-      </div>
+      {showAssistChat !== null && (
+        <div className={`thread-chat-wrapper ${showAssistChat ? 'open' : ''}`} hidden={!showAssistChat}>
+          <Suspense fallback={<p className="workspace-panel-loading" role="status">Loading Copilot…</p>}>
+            <AssistChatPanel onClose={() => setShowAssistChat(false)} selectedEmail={selectedEmail} />
+          </Suspense>
+        </div>
+      )}
     </div>
   );
 }

@@ -151,9 +151,9 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
     }
   };
 
-  const handleOpenThread = (threadId) => {
+  const handleOpenThread = (threadId, account = selectedEmail) => {
     const params = new URLSearchParams();
-    if (selectedEmail) params.set('email', selectedEmail);
+    if (account) params.set('email', account);
     navigate(`/thread/${threadId}?${params.toString()}`);
   };
 

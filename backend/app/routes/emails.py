@@ -8,7 +8,8 @@ from sqlalchemy.orm import selectinload
 from typing import List
 from pydantic import BaseModel
 from app.database import get_db
-from app.models import User, UserEmail, OAuthToken
+from app.models import User, UserEmail
+from app.routes.auth import get_current_user_id
 from datetime import datetime
 
 router = APIRouter()
@@ -31,18 +32,9 @@ class EmailListResponse(BaseModel):
     primary_email: str | None
 
 
-class SetPrimaryEmailRequest(BaseModel):
-    email_id: int
-
-
-# TODO: Implement proper authentication dependency
-# For now, user_id is passed as a query parameter
-# In production, this should come from session/JWT token
-
-
 @router.get("/emails", response_model=EmailListResponse)
 async def list_user_emails(
-    user_id: int,  # TODO: Replace with Depends(get_current_user_id)
+    user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
     """List all emails for the current user"""
@@ -69,7 +61,7 @@ async def list_user_emails(
 
 @router.post("/emails/add")
 async def initiate_add_email(
-    user_id: int,  # TODO: Replace with Depends(get_current_user_id)
+    user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -89,14 +81,14 @@ async def initiate_add_email(
     return {
         "message": "Redirect user to OAuth URL to add email",
         "oauth_url": oauth_url,
-        "oauth_url_endpoint": "/api/auth/google/login?action=add_email&user_id={user_id}"
+        "oauth_url_endpoint": f"/api/auth/google/login?action=add_email&user_id={user_id}"
     }
 
 
 @router.put("/emails/{email_id}/set-primary")
 async def set_primary_email(
     email_id: int,
-    user_id: int,  # TODO: Replace with Depends(get_current_user_id)
+    user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
     """Set an email as the primary email for the user"""
@@ -135,7 +127,7 @@ async def set_primary_email(
 @router.delete("/emails/{email_id}")
 async def delete_email(
     email_id: int,
-    user_id: int,  # TODO: Replace with Depends(get_current_user_id)
+    user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
     """Delete an email account (and its associated OAuth token)"""
@@ -181,7 +173,7 @@ async def delete_email(
 @router.get("/emails/{email_id}")
 async def get_email(
     email_id: int,
-    user_id: int,  # TODO: Replace with Depends(get_current_user_id)
+    user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
     """Get details of a specific email"""
