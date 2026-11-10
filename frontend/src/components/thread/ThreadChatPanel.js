@@ -1,10 +1,10 @@
 import WorkspaceIcon from '../workspace/WorkspaceIcon';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { api } from '../../services/api';
 import './ThreadChatPanel.css';
+import DraftEditor from './DraftEditor';
 
-function ThreadChatPanel({ threadId, email, userId, onClose }) {
+function ThreadChatPanel({ threadId, email, userId, onClose, isOpen }) {
   const cacheKey = userId ? `thread_chat_${userId}_${email || 'primary'}_${threadId}` : null;
   // Load conversation history from localStorage on mount (persists across browser sessions)
   const getCachedMessages = () => {
@@ -45,6 +45,58 @@ function ThreadChatPanel({ threadId, email, userId, onClose }) {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const panelRef = useRef(null);
+
+  const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 768px)').matches);
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 768px)');
+    const update = () => setMobile(query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const panel = panelRef.current;
+    const trigger = document.activeElement;
+    panel.querySelector('.chat-close-btn')?.focus();
+    const blocked = [];
+    if (mobile) {
+      for (let parent = panel.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+        for (const element of parent.parentElement.children) {
+          if (element !== parent && !element.inert) {
+            element.inert = true;
+            blocked.push(element);
+          }
+        }
+      }
+    }
+    const keyboard = event => {
+      if (event.key === 'Escape' && (mobile || panel.contains(document.activeElement))) {
+        event.preventDefault();
+        onClose();
+      }
+      if (mobile && event.key === 'Tab') {
+        const controls = [...panel.querySelectorAll(
+          'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), summary'
+        )].filter(element => element.getClientRects().length);
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', keyboard);
+    return () => {
+      document.removeEventListener('keydown', keyboard);
+      blocked.forEach(element => { element.inert = false; });
+      if (panel.contains(document.activeElement) || document.activeElement === document.body) trigger?.focus();
+    };
+  }, [isOpen, mobile, onClose]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -147,7 +199,6 @@ function ThreadChatPanel({ threadId, email, userId, onClose }) {
         if (finalResult.success) {
           // Check if this is a draft generation response
           // Debug: log draft_data to see what we're getting
-          console.log('Final result draft_data:', finalResult.draft_data);
 
           const hasDraft =
             finalResult.draft_data && finalResult.draft_data.subject && finalResult.draft_data.body;
@@ -172,7 +223,6 @@ function ThreadChatPanel({ threadId, email, userId, onClose }) {
               finalResult.draft_data.subject || '(No subject)'
             }\n\n**Body:**\n${cleanBody}`;
 
-            console.log('Draft detected! isDraft:', isDraft, 'draftData:', draftData);
           }
 
           const assistantMessage = {
@@ -254,7 +304,7 @@ function ThreadChatPanel({ threadId, email, userId, onClose }) {
     };
   }, [isResizing]);
 
-  const handleDraftReply = async (saveToGmail = false) => {
+  const handleDraftReply = async () => {
     if (loading) return;
     setLoading(true);
     setLoadingType('draft'); // Set loading type to draft
@@ -263,7 +313,7 @@ function ThreadChatPanel({ threadId, email, userId, onClose }) {
     // Add user message to show what action was taken
     const userActionMessage = {
       role: 'user',
-      content: saveToGmail ? 'Generate and save draft to Gmail' : 'Generate draft reply',
+      content: 'Generate draft reply',
       timestamp: new Date(),
     };
     setMessages((prev) => [...prev, userActionMessage]);
@@ -274,7 +324,7 @@ function ThreadChatPanel({ threadId, email, userId, onClose }) {
         thread_id: threadId,
         email: email || null,
         tone: 'professional',
-        save_to_gmail: saveToGmail,
+        save_to_gmail: false,
       };
 
       // Use fetch for SSE streaming
@@ -362,6 +412,7 @@ function ThreadChatPanel({ threadId, email, userId, onClose }) {
             isDraft: true,
             draftData: {
               subject: finalResult.subject,
+              to: finalResult.to,
               body: cleanBody, // Use cleaned body
               full_draft: finalResult.full_draft,
               gmail_draft_id: finalResult.gmail_draft_id,
@@ -424,6 +475,7 @@ function ThreadChatPanel({ threadId, email, userId, onClose }) {
   return (
     <div
       ref={panelRef}
+      role="dialog" aria-label="Thread assistant" aria-modal={isOpen && mobile ? true : undefined}
       className={`thread-chat-panel ${isMinimized ? 'minimized' : ''}`}
       style={{ width: `${width}px` }}
     >
@@ -450,7 +502,7 @@ function ThreadChatPanel({ threadId, email, userId, onClose }) {
           >
             <WorkspaceIcon name="chevron" className={isMinimized ? 'workspace-rotated' : ''} />
           </button>
-          <button className="chat-action-btn" onClick={onClose} title="Close">
+          <button className="chat-action-btn chat-close-btn" onClick={onClose} aria-label="Close assistant" title="Close">
             <WorkspaceIcon name="close" />
           </button>
         </div>
@@ -475,17 +527,10 @@ function ThreadChatPanel({ threadId, email, userId, onClose }) {
                   ))}
                   <button
                     className="quick-action-btn"
-                    onClick={() => handleDraftReply(false)}
+                    onClick={handleDraftReply}
                     disabled={loading}
                   >
                     Generate Draft
-                  </button>
-                  <button
-                    className="quick-action-btn primary"
-                    onClick={() => handleDraftReply(true)}
-                    disabled={loading}
-                  >
-                    Save to Gmail
                   </button>
                 </div>
               </div>
@@ -537,49 +582,14 @@ function ThreadChatPanel({ threadId, email, userId, onClose }) {
                               {isCopied ? 'Copied!' : 'Copy Body'}
                             </button>
                             {!msg.draftData.gmail_draft_id && (
-                              <button
-                                className="draft-save-btn"
-                                onClick={async () => {
-                                  try {
-                                    // Use existing draft data to save
-                                    const response = await api.post('/thread-chat/save-draft', {
-                                      thread_id: threadId,
-                                      subject: msg.draftData.subject,
-                                      body: msg.draftData.body,
-                                      to: msg.draftData.to,
-                                      email: email || null,
-                                    });
-                                    if (response.data.success && response.data.gmail_draft_id) {
-                                      // Update the message to show it's saved
-                                      setMessages((prev) =>
-                                        prev.map((m, idx) =>
-                                          idx === messages.indexOf(msg)
-                                            ? {
-                                                ...m,
-                                                content: m.content.replace(
-                                                  '**Draft Reply Generated**',
-                                                  '**Draft Reply Generated**\n\n✅ **Draft saved to Gmail!**',
-                                                ),
-                                                draftData: {
-                                                  ...m.draftData,
-                                                  gmail_draft_id: response.data.gmail_draft_id,
-                                                },
-                                              }
-                                            : m,
-                                        ),
-                                      );
-                                    }
-                                  } catch (error) {
-                                    alert(
-                                      `Failed to save to Gmail: ${
-                                        error.response?.data?.detail || error.message
-                                      }`,
-                                    );
-                                  }
-                                }}
-                              >
-                                Save to Gmail
-                              </button>
+                              <DraftEditor draft={msg.draftData} threadId={threadId} email={email}
+                                onSaved={draft => setMessages(previous => previous.map(message =>
+                                  message === msg ? {
+                                    ...message, draftData: draft,
+                                    content: '**Draft saved to Gmail**\n\n**Subject:**\n' + draft.subject + '\n\n' + draft.body,
+                                  } : message
+                                ))}
+                              />
                             )}
                             {msg.draftData.gmail_draft_id && (
                               <a

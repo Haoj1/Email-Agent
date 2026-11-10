@@ -6,6 +6,7 @@ const paths = {
   overview: 'M3.5 4h7v7h-7zM13.5 4h7v4h-7zM13.5 11h7v9h-7zM3.5 14h7v6h-7z',
   mail: 'M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Zm0 1 8 6 8-6',
   priority: 'M4 5h16M4 12h10M4 19h5m8-5 3 3-3 3-3-3z',
+  followup: 'M8 5H5v16h14V5h-3M9 3h6v4H9zM8 14l2.5 2.5L16 11',
   logout: 'M10 5H5v14h5m4-11 4 4-4 4m-5-4h9',
   spark: 'M12 2.8 14.5 9.5 21.2 12l-6.7 2.5-2.5 6.7-2.5-6.7L2.8 12l6.7-2.5L12 2.8Z',
   calendar: 'M5 5h14a1 1 0 0 1 1 1v13H4V6a1 1 0 0 1 1-1Zm-1 5h16M8 3v4m8-4v4m-8 7h2m4 0h2',

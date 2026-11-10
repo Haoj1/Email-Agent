@@ -34,6 +34,17 @@ export const EmailCacheProvider = ({ children }) => {
   const [triageAccountInfo, setTriageAccountInfo] = useState(null); // { email, index, total }
   
   const scanProgress = useRef(new Map());
+  const returnViews = useRef(new Map());
+  const rememberReturnView = (key, view) => {
+    if (returnViews.current.size >= 4) returnViews.current.delete(returnViews.current.keys().next().value);
+    returnViews.current.set(key, { ...view, scroll: window.scrollY });
+  };
+  const getReturnView = key => returnViews.current.get(key);
+  const noteServerSync = useCallback(changedAccounts => {
+    setTriageLastComplete({
+      run_id: ++triageRunIdRef.current, serverSync: true, changedAccounts, completedAt: Date.now(),
+    });
+  }, []);
 
   const getCacheKey = (email) => email || 'default';
 
@@ -117,6 +128,7 @@ export const EmailCacheProvider = ({ children }) => {
         return newCache;
       });
     } else {
+      returnViews.current.clear();
       setCache({});
     }
   }, []);
@@ -266,6 +278,9 @@ export const EmailCacheProvider = ({ children }) => {
   const cancelTriage = useCallback(() => triageAbortRef.current?.abort(), []);
 
   const value = {
+    rememberReturnView,
+    getReturnView,
+    noteServerSync,
     // Cache functions
     getCachedThreads,
     setCachedThreads,

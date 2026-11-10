@@ -1,6 +1,7 @@
 import WorkspaceIcon from '../components/workspace/WorkspaceIcon';
-import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
-import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import { Link, useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import FollowUpEditor from '../components/followups/FollowUpEditor';
 import { api } from '../services/api';
 import { useEmailCache } from '../contexts/EmailCacheContext';
 import { findRelatedThreads } from '../utils/relatedThreads';
@@ -11,6 +12,11 @@ const ThreadChatPanel = lazy(() => import('../components/thread/ThreadChatPanel'
 function ThreadDetail({ primaryEmail, userId }) {
   const { threadId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnPath = location.state?.backTo;
+  const returnPage = ["/dashboard", "/threads", "/triage", "/follow-ups"].find(path => returnPath?.split("?")[0] === path);
+  const back = () => { if (returnPage) navigate(-1); else navigate("/dashboard"); };
+  const backLabel = { "/threads": "Inbox", "/triage": "Needs attention", "/follow-ups": "Follow-ups" }[returnPage] || "Home";
   const [searchParams] = useSearchParams();
   const email = searchParams.get('email');
   const { getCachedThreads } = useEmailCache();
@@ -19,6 +25,7 @@ function ThreadDetail({ primaryEmail, userId }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showChat, setShowChat] = useState(null);
+  const closeChat = useCallback(() => setShowChat(false), []);
   const [remoteRelated, setRemoteRelated] = useState(null);
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [relatedError, setRelatedError] = useState('');
@@ -84,8 +91,8 @@ function ThreadDetail({ primaryEmail, userId }) {
         <div className="error-message">
           <h2>Error loading thread</h2>
           <p>{error}</p>
-          <button className="btn-primary" onClick={() => navigate('/dashboard')}>
-            Back to Dashboard
+          <button className="btn-primary" onClick={back}>
+            Back to {backLabel}
           </button>
         </div>
       </div>
@@ -97,8 +104,8 @@ function ThreadDetail({ primaryEmail, userId }) {
       <div className="thread-detail-container">
         <div className="error-message">
           <h2>Thread not found</h2>
-          <button className="btn-primary" onClick={() => navigate('/dashboard')}>
-            Back to Dashboard
+          <button className="btn-primary" onClick={back}>
+            Back to {backLabel}
           </button>
         </div>
       </div>
@@ -139,8 +146,8 @@ function ThreadDetail({ primaryEmail, userId }) {
   return (
     <div className="thread-detail-container">
       <div className="thread-header">
-        <button className="btn-back" onClick={() => navigate('/dashboard')}>
-          <WorkspaceIcon name="back" /> Back to Dashboard
+        <button className="btn-back" onClick={back}>
+          <WorkspaceIcon name="back" /> Back to {backLabel}
         </button>
         <h1>{subject}</h1>
         <div className="thread-info">
@@ -165,6 +172,8 @@ function ThreadDetail({ primaryEmail, userId }) {
           </button>
         </div>
       </div>
+
+      {account && <FollowUpEditor key={account + ":" + threadId} threadId={threadId} email={account} />}
 
       <section className="workspace-related" aria-labelledby="related-title">
         <div className="workspace-related-head">
@@ -255,9 +264,9 @@ function ThreadDetail({ primaryEmail, userId }) {
       {showChat !== null && (
         <div className={`thread-chat-wrapper ${showChat ? 'open' : ''}`} hidden={!showChat}>
           <Suspense fallback={<p className="workspace-panel-loading" role="status">Loading assistant…</p>}>
-            <ThreadChatPanel threadId={threadId} email={account} userId={userId} onClose={() => setShowChat(false)} />
+            <ThreadChatPanel threadId={threadId} email={account} userId={userId} isOpen={showChat} onClose={closeChat} />
           </Suspense>
-          <div className="thread-chat-overlay" onClick={() => setShowChat(false)} />
+          <div className="thread-chat-overlay" onClick={closeChat} />
         </div>
       )}
     </div>

@@ -1,7 +1,7 @@
 """
 Database models for MVP - Minimal but sufficient design
 """
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, UniqueConstraint, Float, Index, Boolean, CheckConstraint
+from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, ForeignKey, UniqueConstraint, Float, Index, Boolean, CheckConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -49,6 +49,60 @@ class UserEmail(Base):
     __table_args__ = (
         Index('idx_user_email_user_primary', 'user_id', 'is_primary'),  # Find primary email
         UniqueConstraint('user_id', 'email', name='unique_user_email'),  # One email per user
+    )
+
+
+class LoginSession(Base):
+    __tablename__ = "login_sessions"
+
+    token_hash = Column(String(64), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    email = Column(String, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class FollowUp(Base):
+    __tablename__ = "follow_ups"
+
+    user_email_id = Column(Integer, ForeignKey("user_emails.id", ondelete="CASCADE"), primary_key=True)
+    thread_id = Column(String(128), primary_key=True)
+    subject = Column(String(512), nullable=False)
+    status = Column(String(16), nullable=False)
+    due_at = Column(DateTime(timezone=True))
+    last_inbound_at_ms = Column(BigInteger, nullable=False, server_default="0")
+    reopened_at = Column(DateTime(timezone=True))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("status IN ('reply', 'waiting', 'later', 'done')", name="follow_up_status"),
+        Index("idx_follow_up_mailbox_status_due", "user_email_id", "status", "due_at"),
+    )
+
+
+class MailboxSyncState(Base):
+    __tablename__ = "mailbox_sync_state"
+
+    user_email_id = Column(Integer, ForeignKey("user_emails.id", ondelete="CASCADE"), primary_key=True)
+    history_id = Column(String(32))
+    bootstrap_history_id = Column(String(32))
+    page_token = Column(Text)
+    next_check_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    synced_at = Column(DateTime(timezone=True))
+    changed_at = Column(DateTime(timezone=True))
+
+
+class MailboxThreadIndex(Base):
+    __tablename__ = "mailbox_thread_index"
+
+    user_email_id = Column(Integer, ForeignKey("user_emails.id", ondelete="CASCADE"), primary_key=True)
+    thread_id = Column(String(128), primary_key=True)
+    desired_version = Column(String(64), nullable=False)
+    indexed_version = Column(String(64))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_mailbox_thread_pending", "user_email_id", "updated_at",
+              postgresql_where=(indexed_version.is_distinct_from(desired_version))),
     )
 
 
@@ -177,6 +231,7 @@ class TriageResult(Base):
     summary = Column(Text, nullable=True)
     key_points = Column(JSONB, nullable=True)
     message_count = Column(Integer, nullable=True)  # Number of messages in thread when triaged (for smart updates)
+    ai_reviewed = Column(Boolean, nullable=False, server_default="false")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
@@ -255,6 +310,7 @@ class EmailEmbedding(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_email_id = Column(Integer, ForeignKey("user_emails.id", ondelete="CASCADE"))
     thread_id = Column(String, nullable=False, index=True)
     message_id = Column(String, nullable=True)
     
@@ -268,4 +324,5 @@ class EmailEmbedding(Base):
     
     __table_args__ = (
         Index('idx_email_embedding_user_thread', 'user_id', 'thread_id'),
+        Index('idx_email_embedding_mailbox_thread', 'user_email_id', 'thread_id'),
     )

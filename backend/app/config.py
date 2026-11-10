@@ -1,8 +1,12 @@
 import json
 import os
 from pathlib import Path
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 from typing import List
+
+DEVELOPMENT_SESSION_SECRET = "your-secret-key-change-in-production"
+
 
 class Settings(BaseSettings):
     # Server
@@ -15,7 +19,18 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:3001"
     
     # Session
-    SESSION_SECRET: str = "your-secret-key-change-in-production"
+    SESSION_SECRET: str = DEVELOPMENT_SESSION_SECRET
+
+    @model_validator(mode="after")
+    def require_production_secret(self):
+        self.NODE_ENV = self.NODE_ENV.lower()
+        if self.MAILBOX_SYNC_ENABLED is None:
+            self.MAILBOX_SYNC_ENABLED = self.NODE_ENV == "production"
+        if self.NODE_ENV == "production" and (
+            self.SESSION_SECRET == DEVELOPMENT_SESSION_SECRET or len(self.SESSION_SECRET.strip()) < 32
+        ):
+            raise ValueError("Set SESSION_SECRET to a unique random secret of at least 32 characters")
+        return self
     
     # Google OAuth
     GOOGLE_CLIENT_ID: str = ""
@@ -46,6 +61,11 @@ class Settings(BaseSettings):
     # LLM Provider Selection
     LLM_PROVIDER: str = "deepseek"  # "deepseek" or "openai"
     
+    # Server-side Gmail sync defaults to enabled in production only.
+    MAILBOX_SYNC_ENABLED: bool | None = None
+    MAILBOX_SYNC_INTERVAL_SECONDS: int = 300
+    MAILBOX_EMBEDDINGS_ENABLED: bool = False
+
     # Web search (free DuckDuckGo via ddgs; no API key)
     ENABLE_WEB_SEARCH: bool = True  # Set False to disable web search tool in Inbox Copilot
     WEB_SEARCH_MAX_RESULTS: int = 5  # Max results per query

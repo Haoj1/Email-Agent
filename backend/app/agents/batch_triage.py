@@ -36,7 +36,7 @@ def review_batch(threads):
         index, label, priority, summary = (row.get(key) for key in ("i", "label", "priority", "summary"))
         if type(index) is not int or not 0 <= index < len(items):
             continue
-        if label not in ("NEEDS_REPLY", "FYI", "ARCHIVE", "SPAM_LIKE"):
+        if label not in ("NEEDS_REPLY", "FYI", "ARCHIVE", "SPAM_LIKE", "REVIEW"):
             continue
         if type(priority) not in (int, float) or not math.isfinite(priority) or not isinstance(summary, str):
             continue

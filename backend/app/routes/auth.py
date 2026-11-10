@@ -1,3 +1,5 @@
+import asyncio
+import hashlib
 import os
 import secrets
 # Allow insecure transport in development (localhost only)
@@ -6,10 +8,10 @@ import secrets
 # We'll check the environment after importing settings
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'  # Set by default for development
 
-from fastapi import APIRouter, Request, Response, HTTPException, Depends, Query, BackgroundTasks
+from fastapi import APIRouter, Request, Response, HTTPException, Depends, Query
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -22,8 +24,7 @@ import httpx
 import re
 from app.config import settings, GOOGLE_SCOPES
 from app.database import get_db
-from app.models import User, UserEmail, OAuthToken
-from app.services.background_tasks import sync_and_embed_emails
+from app.models import LoginSession, User, UserEmail, OAuthToken
 
 # In production, remove the insecure transport setting
 # For now, we keep it enabled for local development
@@ -32,9 +33,7 @@ if settings.NODE_ENV == "production":
 
 router = APIRouter()
 
-# In-memory session storage (will be replaced with database later)
-# Format: {session_id: {email: str, tokens: dict}}
-user_sessions = {}
+SESSION_SECONDS = 86400
 OAUTH_STATE_COOKIE = "email_agent_oauth_state"
 OAUTH_COOKIE_PATH = "/api/auth/google"
 OAUTH_STATE_SECONDS = 600
@@ -258,191 +257,95 @@ async def google_callback(
         print(f"Error in OAuth callback: {type(e).__name__}")
         return oauth_error("Google sign-in failed. Try again.")
 
+def session_digest(token):
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+async def authenticated_session(request, db):
+    token = request.cookies.get("session_id")
+    if not token:
+        raise HTTPException(401, "Not authenticated")
+    session = await db.scalar(select(LoginSession).where(
+        LoginSession.token_hash == session_digest(token), LoginSession.expires_at > func.now()
+    ))
+    if session is None:
+        raise HTTPException(401, "Not authenticated")
+    return session
+
+
 @router.get("/me")
-async def get_current_user(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
-):
-    """Get current authenticated user from database"""
-    session_id = request.cookies.get("session_id")
-    if not session_id or session_id not in user_sessions:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    user_data = user_sessions[session_id]
-    user_id = user_data.get("user_id")
-    
-    if user_id:
-        # Get user from database with emails
-        user = await db.get(User, user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        
-        # Trigger background sync and embedding for the user (only if not recently done)
-        # This is a lightweight check - the actual deduplication happens in the task itself
-        background_tasks.add_task(sync_and_embed_emails, user_id, None, 7, False)
-        
-        # Get all emails for user
-        result = await db.execute(
-            select(UserEmail).where(UserEmail.user_id == user_id)
-        )
-        emails = result.scalars().all()
-        
-        primary_email_obj = next((e for e in emails if e.is_primary), None)
-        
-        return {
-            "user_id": user.id,
-            "email": user_data.get("email"),
-            "primary_email": user.primary_email,
-            "emails": [
-                {
-                    "id": e.id,
-                    "email": e.email,
-                    "is_primary": e.is_primary,
-                    "verified": e.verified
-                }
-                for e in emails
-            ],
-            "authenticated": True
-        }
-    else:
-        # Fallback to session data
-        return {
-            "email": user_data.get("email"),
-            "authenticated": True
-        }
+async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)):
+    session = await authenticated_session(request, db)
+    user = await db.get(User, session.user_id)
+    if user is None:
+        raise HTTPException(401, "Not authenticated")
+    accounts = (await db.scalars(select(UserEmail).where(UserEmail.user_id == user.id))).all()
+    return {
+        "user_id": user.id,
+        "email": session.email,
+        "primary_email": user.primary_email,
+        "emails": [
+            {"id": account.id, "email": account.email, "is_primary": account.is_primary, "verified": account.verified}
+            for account in accounts
+        ],
+        "authenticated": True,
+        "server_sync": settings.MAILBOX_SYNC_ENABLED,
+    }
+
 
 @router.post("/logout")
-async def logout(request: Request):
-    """Logout current user"""
-    session_id = request.cookies.get("session_id")
-    if session_id and session_id in user_sessions:
-        del user_sessions[session_id]
-    
+async def logout(request: Request, db: AsyncSession = Depends(get_db)):
+    token = request.cookies.get("session_id")
+    if token:
+        await db.execute(delete(LoginSession).where(LoginSession.token_hash == session_digest(token)))
+        await db.commit()
     response = JSONResponse({"message": "Logged out successfully"})
     response.delete_cookie("session_id")
     return response
 
 
-async def get_current_user_id(
-    request: Request,
-    db: AsyncSession = Depends(get_db)
-) -> int:
-    """
-    Dependency function to get current authenticated user ID
-    Used by other routes that need user_id (e.g., triage.py)
-    """
-    session_id = request.cookies.get("session_id")
-    if not session_id or session_id not in user_sessions:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    user_data = user_sessions[session_id]
-    user_id = user_data.get("user_id")
-    
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    # Verify user exists in database
-    user = await db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    return user_id
+async def get_current_user_id(request: Request, db: AsyncSession = Depends(get_db)) -> int:
+    return (await authenticated_session(request, db)).user_id
 
 
 async def get_user_credentials(
-    request: Request,
-    email: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
+    request: Request, email: Optional[str] = None, db: AsyncSession = Depends(get_db)
 ) -> Credentials:
-    """
-    Get user credentials from database.
-    If email is provided, use that email's token. Otherwise use primary email.
-    """
-    session_id = request.cookies.get("session_id")
-    if not session_id or session_id not in user_sessions:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    user_data = user_sessions[session_id]
-    user_id = user_data.get("user_id")
-    
-    if not user_id:
-        # Fallback to session-based auth (legacy)
-        tokens = user_data.get("tokens", {})
-        if not tokens:
-            raise HTTPException(status_code=401, detail="No credentials found")
-        
-        credentials = Credentials(
-            token=tokens.get("token"),
-            refresh_token=tokens.get("refresh_token"),
-            token_uri=tokens.get("token_uri"),
-            client_id=tokens.get("client_id"),
-            client_secret=tokens.get("client_secret"),
-            scopes=tokens.get("scopes")
-        )
-        
-        if credentials.expired and credentials.refresh_token:
-            credentials.refresh(GoogleRequest())
-            user_sessions[session_id]["tokens"]["token"] = credentials.token
-        
-        return credentials
-    
-    # Get token from database
-    if email:
-        # Find specific email
-        result = await db.execute(
-            select(UserEmail).where(
-                UserEmail.user_id == user_id,
-                UserEmail.email == email
-            )
-        )
-        user_email_obj = result.scalar_one_or_none()
-    else:
-        # Use primary email
-        result = await db.execute(
-            select(UserEmail).where(
-                UserEmail.user_id == user_id,
-                UserEmail.is_primary == True
-            )
-        )
-        user_email_obj = result.scalar_one_or_none()
-    
-    if not user_email_obj:
-        raise HTTPException(status_code=404, detail="Email not found")
-    
-    # Get OAuth token
-    result = await db.execute(
-        select(OAuthToken).where(
-            OAuthToken.user_email_id == user_email_obj.id
-        )
-    )
-    oauth_token = result.scalar_one_or_none()
-    
-    if not oauth_token:
-        raise HTTPException(status_code=404, detail="OAuth token not found")
-    
-    # Build credentials
-    scopes = oauth_token.scope.split() if oauth_token.scope else []
-    credentials = Credentials(
-        token=oauth_token.access_token,
-        refresh_token=oauth_token.refresh_token,
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=settings.GOOGLE_CLIENT_ID,
-        client_secret=settings.GOOGLE_CLIENT_SECRET,
-        scopes=scopes
-    )
-    
-    # Refresh token if expired
-    if credentials.expired and credentials.refresh_token:
-        credentials.refresh(GoogleRequest())
-        # Update token in database
-        oauth_token.access_token = credentials.token
-        if hasattr(credentials, 'expiry') and credentials.expiry:
-            oauth_token.expires_at = credentials.expiry
-        oauth_token.updated_at = datetime.now(timezone.utc)
+    user_id = await get_current_user_id(request, db)
+    query = select(UserEmail.id).where(UserEmail.user_id == user_id)
+    query = query.where(UserEmail.email == email) if email else query.where(UserEmail.is_primary.is_(True))
+    mailbox_id = await db.scalar(query)
+    if mailbox_id is None:
+        raise HTTPException(404, "Email not found")
+    credentials = await get_mailbox_credentials(db, mailbox_id)
+    if db.dirty:
         await db.commit()
-    
     return credentials
+
+
+async def get_mailbox_credentials(db, mailbox_id):
+    token = await db.scalar(select(OAuthToken).where(
+        OAuthToken.user_email_id == mailbox_id, OAuthToken.provider == "google"
+    ))
+    if token is None:
+        raise HTTPException(404, "OAuth token not found")
+
+    expiry = token.expires_at
+    if expiry is not None and expiry.tzinfo:
+        expiry = expiry.astimezone(timezone.utc).replace(tzinfo=None)
+    credentials = Credentials(
+        token=token.access_token, refresh_token=token.refresh_token,
+        token_uri="https://oauth2.googleapis.com/token", client_id=settings.GOOGLE_CLIENT_ID,
+        client_secret=settings.GOOGLE_CLIENT_SECRET, scopes=token.scope.split() if token.scope else [],
+        expiry=expiry,
+    )
+    if credentials.expired and credentials.refresh_token:
+        await asyncio.to_thread(credentials.refresh, GoogleRequest())
+        token.access_token = credentials.token
+        token.expires_at = credentials.expiry.replace(tzinfo=timezone.utc) if credentials.expiry else None
+        token.updated_at = datetime.now(timezone.utc)
+    return credentials
+
 
 @router.get("/test/gmail")
 async def test_gmail(
@@ -623,7 +526,7 @@ async def handle_login(
     if existing_token:
         # Update existing token
         existing_token.access_token = credentials.token
-        existing_token.refresh_token = credentials.refresh_token
+        existing_token.refresh_token = credentials.refresh_token or existing_token.refresh_token
         existing_token.expires_at = expires_at
         existing_token.scope = ' '.join(credentials.scopes) if credentials.scopes else None
         existing_token.updated_at = datetime.now(timezone.utc)
@@ -640,17 +543,18 @@ async def handle_login(
         )
         db.add(oauth_token)
     
-    await db.commit()
-    
-    # Store user_id in session (for backward compatibility with existing session system)
-    user_sessions.pop(request.cookies.get("session_id"), None)
+    old_token = request.cookies.get("session_id")
+    expired = LoginSession.expires_at <= func.now()
+    await db.execute(delete(LoginSession).where(
+        expired | (LoginSession.token_hash == session_digest(old_token)) if old_token else expired
+    ))
     session_id = secrets.token_urlsafe(32)
-    user_sessions[session_id] = {
-        "user_id": user.id,
-        "email": user_email,
-        "primary_email": user.primary_email
-    }
-    
+    db.add(LoginSession(
+        token_hash=session_digest(session_id), user_id=user.id, email=user_email,
+        expires_at=datetime.now(timezone.utc) + timedelta(seconds=SESSION_SECONDS),
+    ))
+    await db.commit()
+
     # Redirect to frontend
     response = RedirectResponse(
         url=f"{settings.FRONTEND_URL}/auth/callback?success=true&email={user_email}&user_id={user.id}"
@@ -661,7 +565,7 @@ async def handle_login(
         httponly=True,
         secure=settings.NODE_ENV == "production",
         samesite="lax",
-        max_age=86400  # 24 hours
+        max_age=SESSION_SECONDS
     )
     return response
 
@@ -720,7 +624,7 @@ async def handle_add_email(
     if existing_token:
         # Update existing token
         existing_token.access_token = credentials.token
-        existing_token.refresh_token = credentials.refresh_token
+        existing_token.refresh_token = credentials.refresh_token or existing_token.refresh_token
         existing_token.expires_at = expires_at
         existing_token.scope = ' '.join(credentials.scopes) if credentials.scopes else None
         existing_token.updated_at = datetime.now(timezone.utc)

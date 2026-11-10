@@ -148,39 +148,12 @@ def create_assist_chat_tools(
                 "error": str(e)
             }
     
-    @tool
-    def web_search(query: str, max_results: int = 5) -> Dict[str, Any]:
-        """
-        Search the web for current information. Use when the user asks about topics outside their emails (e.g. company info, news, definitions, recent events).
-        Do not use for finding emails—use search_emails_rag or query_triage_results instead.
-        
-        Args:
-            query: Search query (e.g. "Company X latest news", "what is API")
-            max_results: Maximum number of results to return (default: 5, max 10)
-        
-        Returns:
-            Dictionary with list of search results (title, link, snippet) or error.
-        """
-        if not getattr(settings, "ENABLE_WEB_SEARCH", True):
-            return {"success": False, "error": "Web search is disabled"}
-        try:
-            max_results = min(max_results, getattr(settings, "WEB_SEARCH_MAX_RESULTS", 10) or 10)
-            return {
-                "success": True,
-                "message": "Searching the web...",
-                "params": {"query": query, "max_results": max_results},
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-    
     # Add Gmail tools if gmail services are available
     tools = [
         query_triage_results,
         search_emails_rag,
         get_important_emails,
     ]
-    if getattr(settings, "ENABLE_WEB_SEARCH", True):
-        tools.append(web_search)
     
     # For backward compatibility
     if gmail_service and not primary_gmail_service:
@@ -398,7 +371,8 @@ async def execute_search_emails_rag(
     db: AsyncSession,
     user_id: int,
     query: str,
-    limit: int = 5
+    limit: int = 5,
+    email: str | None = None,
 ) -> Dict[str, Any]:
     """Execute the search_emails_rag tool asynchronously"""
     try:
@@ -407,7 +381,7 @@ async def execute_search_emails_rag(
             user_id=user_id,
             query=query,
             limit=max(1, min(limit, 12)),
-            db=db
+            db=db, email=email,
         )
         
         return {

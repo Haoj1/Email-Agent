@@ -11,12 +11,13 @@ from datetime import datetime, timedelta, timezone
 import json
 import asyncio
 from jose import JWTError, jwt
-from sqlalchemy.dialects.postgresql import insert
 from app.config import settings
 from app.database import get_db
 from app.routes.auth import get_user_credentials, get_current_user_id
 from app.services.gmail_service import GmailService
+from app.services.follow_ups import reopen_follow_ups
 from app.services.triage_rules import classify_metadata
+from app.services.triage_store import write_triage_results
 from app.models import TriageResult, User, UserEmail
 from sqlalchemy import select
 
@@ -90,10 +91,11 @@ async def stream_triage_progress(
         raw, next_token = await asyncio.to_thread(
             service.get_thread_page, page_size, days, query=query, page_token=page_token, strict=True
         )
+        reopened = await reopen_follow_ups(db, user_id, email, raw)
         threads = [thread for item in raw if (thread := service.normalize_thread(item, message_limit=3))]
         counts = {thread["thread_id"]: thread["message_count"] for thread in threads}
         existing = {row.thread_id: row for row in (await db.execute(
-            select(TriageResult.thread_id, TriageResult.message_count, TriageResult.label).where(
+            select(TriageResult.thread_id, TriageResult.message_count, TriageResult.label, TriageResult.ai_reviewed).where(
                 TriageResult.user_id == user_id, TriageResult.thread_id.in_(counts)
             )
         )).all()} if counts else {}
@@ -110,11 +112,12 @@ async def stream_triage_progress(
                 results.append(result)
                 if result["label"] == "REVIEW":
                     uncertain.append(thread)
-            elif previous.label == "REVIEW" and not triage_request.automatic:
+            elif previous.label == "REVIEW" and triage_request.review_unclear and not previous.ai_reviewed:
                 uncertain.append(thread)
 
         skipped = len(threads) - len(results)
         ai_calls = 0
+        reviewed = {}
         ai_reviewed = 0
         ai_unavailable = False
         if triage_request.review_unclear and uncertain:
@@ -136,22 +139,11 @@ async def stream_triage_progress(
             "user_id": user_id, "thread_id": row["thread_id"], "email": email,
             "label": row["label"], "priority": row["priority"], "summary": row["summary"],
             "key_points": row.get("key_points", []), "message_count": counts[row["thread_id"]],
+            "ai_reviewed": row["thread_id"] in reviewed,
         } for row in results if row.get("thread_id") in counts and not row.get("classification_failed")]
 
-        if saved_rows:
-            statement = insert(TriageResult).values(saved_rows)
-            statement = statement.on_conflict_do_update(
-                constraint="unique_user_thread_triage",
-                set_={field: getattr(statement.excluded, field) for field in (
-                    "email", "label", "priority", "summary", "key_points", "message_count"
-                )} | {"updated_at": datetime.now(timezone.utc)},
-                where=(TriageResult.message_count.is_(None) |
-                       (TriageResult.message_count < statement.excluded.message_count) |
-                       ((TriageResult.message_count == statement.excluded.message_count) &
-                        (TriageResult.label == "REVIEW") & (statement.excluded.label != "REVIEW"))),
-            )
-            await db.execute(statement)
-            await db.commit()
+        await write_triage_results(db, saved_rows)
+        await db.commit()
         cursor = jwt.encode({
             "kind": "triage", "user_id": user_id, "email": email, "query": query,
             "page_token": next_token, "page_size": page_size, "exp": now + timedelta(hours=8),
@@ -162,6 +154,7 @@ async def stream_triage_progress(
         }, settings.SESSION_SECRET, algorithm="HS256") if not next_token else None
         yield _triage_event("complete", success=True, scanned_count=len(threads), skipped_count=skipped,
                             processed_count=len(saved_rows), next_cursor=cursor, checkpoint=checkpoint,
+                            follow_ups_reopened=reopened,
                             ai_calls=ai_calls, ai_reviewed=ai_reviewed, ai_unavailable=ai_unavailable,
                             results=[{key: value for key, value in row.items() if key != "user_id"} for row in saved_rows])
     except HttpError as exc:

@@ -5,17 +5,30 @@ Handles Gmail API operations and data normalization
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import HttpRequest
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timedelta
 import base64
 import re
 import email.utils
 
+from app.services.telemetry import timed_operation
+
+class TimedGmailRequest(HttpRequest):
+    def __init__(self, *args, methodId=None, **kwargs):
+        super().__init__(*args, methodId=methodId, **kwargs)
+        self.operation = methodId or "gmail.request"
+
+    def execute(self, *args, **kwargs):
+        with timed_operation("gmail", self.operation):
+            return super().execute(*args, **kwargs)
+
+
 class GmailService:
     """Service for Gmail API operations"""
     
     def __init__(self, credentials: Credentials):
-        self.service = build('gmail', 'v1', credentials=credentials)
+        self.service = build('gmail', 'v1', credentials=credentials, requestBuilder=TimedGmailRequest)
     
     def get_threads(self, max_results: int = 30, days: int = 7, *, query: Optional[str] = None) -> List[Dict]:
         """
@@ -43,8 +56,11 @@ class GmailService:
     def list_thread_page(self, max_results, days, *, query=None, page_token=None, strict=False):
         response = self._thread_listing(max_results, days, query, page_token)
         ids = list(dict.fromkeys(thread["id"] for thread in response.get("threads", [])[:max_results]))
+        return (self.get_metadata_batch(ids, strict=strict),
+                response.get("nextPageToken"), response.get("resultSizeEstimate", 0))
+
+    def get_metadata_batch(self, ids, *, strict=True):
         details = {}
-        resource = self.service.users().threads()
         for offset in range(0, len(ids), 25):
             errors = []
 
@@ -56,16 +72,25 @@ class GmailService:
 
             batch = self.service.new_batch_http_request(callback=record)
             for thread_id in ids[offset:offset + 25]:
-                batch.add(resource.get(
-                    userId="me", id=thread_id, format="metadata",
-                    metadataHeaders=["From", "Subject", "Date", "To", "Cc"],
-                    fields="id,snippet,messages(id,snippet,labelIds,payload(headers))",
-                ), request_id=thread_id)
-            batch.execute()
+                batch.add(self.thread_metadata_request(thread_id), request_id=thread_id)
+            with timed_operation("gmail", "gmail.threads.get_batch", len(ids[offset:offset + 25])):
+                batch.execute()
             if strict and errors:
                 raise errors[0]
-        return ([details[thread_id] for thread_id in ids if thread_id in details],
-                response.get("nextPageToken"), response.get("resultSizeEstimate", 0))
+        return [details[thread_id] for thread_id in ids if thread_id in details]
+
+    def get_history_id(self):
+        return self.service.users().getProfile(userId="me", fields="historyId").execute()["historyId"]
+
+    def get_history_page(self, history_id, page_token=None):
+        params = {
+            "userId": "me", "startHistoryId": history_id, "maxResults": 25,
+            "fields": "historyId,nextPageToken,history(messagesAdded(message/threadId),"
+                      "messagesDeleted(message/threadId),labelsAdded(message/threadId),labelsRemoved(message/threadId))",
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        return self.service.users().history().list(**params).execute()
 
     def get_thread_page(self, max_results, days, *, query=None, page_token=None, strict=False):
         details, next_token, _ = self.list_thread_page(
@@ -75,6 +100,16 @@ class GmailService:
 
     def get_recent_thread_ids(self, max_results: int, days: int) -> List[str]:
         return [thread["id"] for thread in self._thread_listing(max_results, days).get("threads", [])]
+
+    def thread_metadata_request(self, thread_id):
+        return self.service.users().threads().get(
+            userId="me", id=thread_id, format="metadata",
+            metadataHeaders=["From", "Subject", "Date", "To", "Cc"],
+            fields="id,historyId,snippet,messages(id,internalDate,snippet,labelIds,payload(headers))",
+        )
+
+    def get_thread_metadata(self, thread_id):
+        return self.thread_metadata_request(thread_id).execute()
 
     def get_thread_full(self, thread_id: str) -> Dict:
         """

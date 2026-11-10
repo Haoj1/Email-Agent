@@ -6,6 +6,7 @@ const pages = [
   { path: '/dashboard', icon: 'overview', label: 'Home' },
   { path: '/threads', icon: 'mail', label: 'Inbox' },
   { path: '/triage', icon: 'priority', label: 'Needs attention' },
+  { path: '/follow-ups', icon: 'followup', label: 'Follow-ups' },
 ];
 
 export default function Navigation({ user, selectedEmail, onSelectEmail, onLogout, onTabIntent, theme, onToggleTheme }) {

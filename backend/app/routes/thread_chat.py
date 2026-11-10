@@ -425,6 +425,7 @@ async def stream_draft_response(
             'subject': result.get('subject'),
             'body': result.get('body'),
             'full_draft': result.get('full_draft'),
+            'to': result.get('to'),
             'gmail_draft_id': gmail_draft_id,
             'error': None
         })}\n\n"

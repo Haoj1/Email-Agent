@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useEmailCache } from '../contexts/EmailCacheContext';
 import { api } from '../services/api';
 import EmailAccountsCard from '../components/dashboard/EmailAccountsCard';
@@ -50,6 +50,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   const onboardingCopilotRef = useRef(null);
   const onboardingCalendarRef = useRef(null);
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const {
     getCachedThreads,
@@ -219,7 +220,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   };
 
   useEffect(() => {
-    if (triageLastComplete?.processed_count && triagePage === 0) {
+    if ((triageLastComplete?.processed_count || triageLastComplete?.serverSync) && triagePage === 0) {
       loadTriageResults(null, true, false, false, triageDaysFilter, true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -249,7 +250,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   const handleOpenThread = (threadId, account = selectedEmail) => {
     const params = new URLSearchParams();
     if (account) params.set('email', account);
-    navigate(`/thread/${threadId}?${params.toString()}`);
+    navigate(`/thread/${threadId}?${params.toString()}`, { state: { backTo: location.pathname } });
   };
 
   const handleAddEmail = async () => {
@@ -336,7 +337,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
             <h1>Your inbox</h1>
             <p>Find emails, see what needs a reply, and plan your follow-ups.</p>
             <div className="workspace-intro-actions">
-              <a className="btn-primary" href="#priority-inbox"><WorkspaceIcon name="priority" /> Review follow-ups</a>
+              <Link className="btn-primary" to="/follow-ups"><WorkspaceIcon name="followup" /> Open follow-ups</Link>
               <button type="button" className="btn-secondary" onClick={() => setShowAssistChat(true)}><WorkspaceIcon name="spark" /> Ask Copilot</button>
               <button type="button" className="workspace-quiet" onClick={() => { setShowOnboarding(true); setOnboardingStep(1); }}>Guide</button>
             </div>
@@ -495,7 +496,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
           }`}
         >
           <section className="card workspace-card workspace-tool-card">
-            <div><p className="workspace-eyebrow"><WorkspaceIcon name="calendar" /> FOLLOW-UPS</p><h2>Plan follow-ups</h2><p>Review email follow-ups before adding them to your calendar.</p></div>
+            <div><p className="workspace-eyebrow"><WorkspaceIcon name="calendar" /> CALENDAR</p><h2>Schedule follow-ups</h2><p>Review email follow-ups before adding them to your calendar.</p></div>
             <button type="button" className="btn-secondary" aria-expanded={Boolean(scheduleVisible)} onClick={() => setShowSchedule(!scheduleVisible)}>
               {scheduleVisible ? 'Hide schedule' : 'View suggested times'}
             </button>
@@ -560,7 +561,8 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
       {showAssistChat !== null && (
         <div className={`thread-chat-wrapper ${showAssistChat ? 'open' : ''}`} hidden={!showAssistChat}>
           <Suspense fallback={<p className="workspace-panel-loading" role="status">Loading Copilot…</p>}>
-            <AssistChatPanel isOpen={showAssistChat} onClose={() => setShowAssistChat(false)} selectedEmail={selectedEmail} />
+            <AssistChatPanel isOpen={showAssistChat} onClose={() => setShowAssistChat(false)}
+              selectedEmail={selectedEmail || user?.primary_email} mailboxCount={user?.emails?.length} />
           </Suspense>
         </div>
       )}

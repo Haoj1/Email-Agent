@@ -52,7 +52,7 @@ export default function EmailTriageCard({
       {!runningTriage && triageLastComplete?.completedAt && <p className="workspace-search-hint" role="status">
         {triageLastComplete.processed_count > 0
           ? `${triageLastComplete.processed_count} conversation${triageLastComplete.processed_count === 1 ? '' : 's'} updated`
-          : 'No new changes'}
+          : triageLastComplete.serverSync ? 'Mailbox updated' : 'No new changes'}
         {triageLastComplete.aiCalls > 0 && ` · ${triageLastComplete.aiCalls} AI batch(es), ${triageLastComplete.aiReviewed} refined`}
         {triageLastComplete.hasMore && ' · continuing automatically'}
         {triageLastComplete.aiUnavailable && ' · AI was unavailable, basic checks still completed'}

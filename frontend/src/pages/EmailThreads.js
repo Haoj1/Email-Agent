@@ -1,24 +1,32 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { useEmailCache } from '../contexts/EmailCacheContext';
 import { api } from '../services/api';
 import EmailThreadsCard from '../components/dashboard/EmailThreadsCard';
 import './Dashboard.css';
 
 function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
-  const [emailThreads, setEmailThreads] = useState(null);
+  const location = useLocation();
+  const navigationType = useNavigationType();
+  const { getCachedThreads, setCachedThreads, triageLastComplete, rememberReturnView, getReturnView } = useEmailCache();
+  const saved = navigationType === 'POP' ? getReturnView(location.key) : null;
+  const [restored] = useState(() => saved?.email === selectedEmail ? saved : null);
+  const [emailThreads, setEmailThreads] = useState(restored?.results || null);
   const [loadingThreads, setLoadingThreads] = useState(false);
   const threadsRequest = useRef(null);
   useEffect(() => () => threadsRequest.current?.controller.abort(), []);
-  const [emailThreadsNextPageToken, setEmailThreadsNextPageToken] = useState(null);
-  const [daysFilter, setDaysFilter] = useState(14); // Default to 14 days
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchMode, setSearchMode] = useState('exact');
+  const [emailThreadsNextPageToken, setEmailThreadsNextPageToken] = useState(restored?.nextPage || null);
+  const [daysFilter, setDaysFilter] = useState(restored?.days ?? 14);
+  const [searchQuery, setSearchQuery] = useState(restored?.query || '');
+  const [searchMode, setSearchMode] = useState(restored?.mode || 'exact');
   
   const navigate = useNavigate();
-  const { getCachedThreads, setCachedThreads, triageLastComplete } = useEmailCache();
 
   useEffect(() => {
+    if (restored && restored.email === selectedEmail && !threadsRequest.current) {
+      const frame = requestAnimationFrame(() => window.scrollTo(0, restored.scroll));
+      return () => cancelAnimationFrame(frame);
+    }
     if (user && user.authenticated) {
       loadEmailThreads(selectedEmail, false, false, daysFilter, searchQuery);
     }
@@ -27,7 +35,7 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
 
   useEffect(() => {
     const mailbox = selectedEmail || user?.primary_email;
-    if (triageLastComplete?.changedAccounts.includes(mailbox) && !threadsRequest.current?.query
+    if (triageLastComplete?.changedAccounts.includes(mailbox) && !(threadsRequest.current?.query ?? searchQuery.trim())
       && (emailThreads?.data?.threads?.length || 0) <= 30) {
       loadEmailThreads(selectedEmail, true, false, daysFilter, '');
     }
@@ -132,7 +140,11 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
   const handleOpenThread = (threadId) => {
     const params = new URLSearchParams();
     if (selectedEmail) params.set('email', selectedEmail);
-    navigate(`/thread/${threadId}?${params.toString()}`);
+    rememberReturnView(location.key, {
+      email: selectedEmail, results: emailThreads, nextPage: emailThreadsNextPageToken,
+      days: daysFilter, query: searchQuery, mode: searchMode,
+    });
+    navigate(`/thread/${threadId}?${params.toString()}`, { state: { backTo: location.pathname } });
   };
 
   return (
@@ -140,7 +152,7 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
       <div className="dashboard-content full-width">
         <EmailThreadsCard
           loadingThreads={loadingThreads}
-          onLoadMore={() => loadEmailThreads(selectedEmail, false, true, daysFilter, threadsRequest.current?.query, threadsRequest.current?.mode)}
+          onLoadMore={() => loadEmailThreads(selectedEmail, false, true, daysFilter, threadsRequest.current?.query ?? searchQuery, threadsRequest.current?.mode ?? searchMode)}
           hasMore={!!emailThreadsNextPageToken}
           emailThreads={emailThreads}
           onOpenThread={handleOpenThread}

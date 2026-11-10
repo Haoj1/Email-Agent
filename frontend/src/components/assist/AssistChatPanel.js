@@ -29,7 +29,8 @@ function sourcePath(source) {
   return `/thread/${encodeURIComponent(source.thread_id)}${account}`;
 }
 
-function AssistChatPanel({ onClose, selectedEmail, isOpen }) {
+function AssistChatPanel({ onClose, selectedEmail, isOpen, mailboxCount }) {
+  const [allMailboxes, setAllMailboxes] = useState(false);
   const navigate = useNavigate();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -148,6 +149,7 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen }) {
         body: JSON.stringify({
           question: userMessage, action, session_id: sessionId,
           conversation_history: history, email: selectedEmail || null,
+          semantic_scope: allMailboxes ? "all" : "selected",
         }),
       });
       if (!response.ok || !response.body) throw new Error(`Copilot request failed (${response.status}).`);
@@ -592,6 +594,11 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen }) {
           </div>
 
           <div className="thread-chat-input-container">
+            {mailboxCount > 1 && <label className="workspace-ai-review">
+              <input type="checkbox" checked={allMailboxes} disabled={loading}
+                onChange={event => setAllMailboxes(event.target.checked)} />
+              <span>Search for similar emails in all mailboxes</span>
+            </label>}
             {messages.length > 0 && (
               <details className="workspace-copilot-activity workspace-shortcuts">
                 <summary>Quick actions</summary>
@@ -612,7 +619,7 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen }) {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyPress}
-                placeholder="Ask about your emails..."
+                placeholder="Ask about your emails or type /web for public search…"
                 rows={1}
                 disabled={loading || loadingHistory}
               />

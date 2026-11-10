@@ -11,11 +11,13 @@ import './Workspace.css';
 
 const loadThreads = () => import('./pages/EmailThreads');
 const loadPriority = () => import('./pages/EmailTriage');
+const loadFollowUps = () => import('./pages/FollowUps');
+const FollowUpsPage = lazy(loadFollowUps);
 const EmailThreadsPage = lazy(loadThreads);
 const EmailTriagePage = lazy(loadPriority);
 
 function preloadTab(path) {
-  const load = path === '/threads' ? loadThreads : path === '/triage' ? loadPriority : null;
+  const load = path === '/threads' ? loadThreads : path === '/triage' ? loadPriority : path === '/follow-ups' ? loadFollowUps : null;
   load?.().catch(() => {});
 }
 const ThreadDetail = lazy(() => import('./pages/ThreadDetail'));
@@ -34,7 +36,7 @@ function initialTheme() {
 
 // Inner component that has access to EmailCache context
 function AppContent() {
-  const { runTriage, cancelTriage, clearCache } = useEmailCache();
+  const { runTriage, cancelTriage, clearCache, reviewUnclear, noteServerSync } = useEmailCache();
   const [user, setUser] = useState(null);
   const [theme, setTheme] = useState(initialTheme);
   const toggleTheme = () => {
@@ -56,7 +58,7 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
-    if (!user?.authenticated || !user.emails?.length) return;
+    if (!user?.authenticated || !user.emails?.length || (user.server_sync && !reviewUnclear)) return;
     const emails = user.emails.map(account => account.email).filter(Boolean);
     const check = () => runTriage({ emails, userId: user.user_id }).catch(error => {
       console.error('Unable to start automatic email check:', error);
@@ -70,7 +72,40 @@ function AppContent() {
       document.removeEventListener('visibilitychange', check);
       window.removeEventListener('online', check);
     };
-  }, [user, runTriage]);
+  }, [user, runTriage, reviewUnclear]);
+
+  useEffect(() => {
+    if (!user?.server_sync) return;
+    let revisions;
+    let request;
+    const check = async () => {
+      if (document.visibilityState === 'hidden' || !navigator.onLine || request) return;
+      const controller = new AbortController();
+      request = controller;
+      try {
+        const { data } = await api.get('/mailbox-sync', { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        const next = data.revisions || {};
+        const changed = Object.keys(next).filter(email => next[email] !== revisions?.[email]);
+        if (changed.length) noteServerSync(changed);
+        revisions = next;
+      } catch {
+        // The mailbox worker runs independently of this display update.
+      } finally {
+        request = null;
+      }
+    };
+    check();
+    const timer = window.setInterval(check, 30 * 1000);
+    document.addEventListener('visibilitychange', check);
+    window.addEventListener('online', check);
+    return () => {
+      request?.abort();
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', check);
+      window.removeEventListener('online', check);
+    };
+  }, [user, noteServerSync]);
 
   const checkAuth = async () => {
     try {
@@ -163,6 +198,7 @@ function AppContent() {
                             />
                           }
                         />
+                        <Route path="/follow-ups" element={<FollowUpsPage email={selectedEmail || user.primary_email || user.emails?.[0]?.email} />} />
                         <Route path="/thread/:threadId" element={<ThreadDetail primaryEmail={user.primary_email} userId={user.user_id} />} />
                         <Route path="*" element={<Navigate to="/dashboard" replace />} />
                       </Routes>

@@ -9,6 +9,9 @@ from pydantic import BaseModel, Field
 import json
 import uuid
 import asyncio
+from urllib.parse import urlparse
+
+from app.config import settings
 from sqlalchemy import func, select
 from sqlalchemy.orm import defer
 from app.database import get_db
@@ -27,6 +30,7 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None  # If provided, continue existing session
     conversation_history: Optional[List[dict]] = Field(default=None, max_length=60)
     email: Optional[str] = None  # Optional email account to use for Gmail tools
+    semantic_scope: Literal["selected", "all"] = "selected"
 
 
 class ChatResponse(BaseModel):
@@ -51,6 +55,28 @@ def _event(payload):
     return f"data: {json.dumps(payload)}\n\n"
 
 
+async def public_web_result(query):
+    from app.agents.tools.assist_chat_tools import execute_web_search
+    from app.services.telemetry import timed_operation
+
+    if not settings.ENABLE_WEB_SEARCH or not query or len(query) > 500:
+        return {"success": False, "error": "Use /web followed by a public search query of up to 500 characters."}
+    with timed_operation("tool", "public_web_search"):
+        result = await execute_web_search(query)
+    if not result.get("success"):
+        return {"success": False, "error": "Public search is temporarily unavailable."}
+    lines = []
+    for row in result["results"]:
+        url = row["link"]
+        if urlparse(url).scheme not in ("http", "https") or any(c.isspace() for c in url):
+            continue
+        title = row["title"].replace("[", "").replace("]", "")[:200]
+        snippet = " ".join(row["snippet"].split())[:320]
+        lines.append(f"- [{title or 'Result'}](<{url}>) — {snippet}")
+    return {"success": True, "answer": "\n".join(lines) or "No public results found.", "sources": [],
+            "citations": [], "thinking_steps": [], "tool_calls": [{"tool": "web_search", "result": {"success": True}}]}
+
+
 async def stream_chat_response(
     chat_request: ChatRequest, request: Request, db: AsyncSession, user_id: int
 ) -> AsyncGenerator[str, None]:
@@ -70,6 +96,9 @@ async def stream_chat_response(
         else:
             session_id = str(uuid.uuid4())
 
+        question_parts = chat_request.question.strip().split(maxsplit=1)
+        web_requested = not chat_request.action and question_parts and question_parts[0].lower() == "/web"
+        public_query = question_parts[1] if web_requested and len(question_parts) == 2 else ""
         yield _event({"type": "step", "step": {"type": "thinking", "content": "Preparing Copilot…"}})
         accounts = (await db.scalars(select(UserEmail).where(UserEmail.user_id == user_id))).all()
         if chat_request.email and all(account.email != chat_request.email for account in accounts):
@@ -80,7 +109,7 @@ async def stream_chat_response(
         primary_email = next((account.email for account in accounts if account.is_primary), None)
         selected = chat_request.email or primary_email or (accounts[0].email if accounts else None)
         for account in accounts:
-            if chat_request.action == "reply_queue" or (chat_request.action and account.email != selected):
+            if web_requested or chat_request.action == "reply_queue" or (chat_request.action and account.email != selected):
                 continue
             try:
                 credentials = await get_user_credentials(request, account.email, db)
@@ -95,7 +124,9 @@ async def stream_chat_response(
 
         async def run_agent():
             try:
-                if chat_request.action:
+                if web_requested:
+                    work = public_web_result(public_query)
+                elif chat_request.action:
                     from app.services.copilot_shortcuts import run_quick_action
 
                     work = run_quick_action(chat_request.action, db, user_id, gmail_services, selected,
@@ -107,6 +138,7 @@ async def stream_chat_response(
                         db=db, user_id=user_id, gmail_services=gmail_services,
                         primary_gmail_service=gmail_services.get(selected), email=selected,
                         calendar_credentials=credentials_by_account.get(selected),
+                        semantic_email=None if chat_request.semantic_scope == "all" else selected,
                     )
                     work = agent.chat(chat_request.question, history, steps.put_nowait)
                 return await asyncio.wait_for(work, timeout=75)

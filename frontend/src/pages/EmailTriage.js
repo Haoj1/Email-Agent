@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { useEmailCache } from '../contexts/EmailCacheContext';
 import { api } from '../services/api';
 import EmailTriageCard from '../components/dashboard/EmailTriageCard';
@@ -16,17 +16,24 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
     triageLastError,
     triageAccountInfo,
   } = useEmailCache();
-  const [triageResults, setTriageResults] = useState(null);
-  const [triagePage, setTriagePage] = useState(0);
+  const location = useLocation();
+  const navigationType = useNavigationType();
+  const { getCachedTriageResults, setCachedTriageResults, getReturnView, rememberReturnView } = useEmailCache();
+  const [restored] = useState(() => navigationType === 'POP' ? getReturnView(location.key) : null);
+  const [triageResults, setTriageResults] = useState(restored?.results || null);
+  const [triagePage, setTriagePage] = useState(restored?.page || 0);
   const TRIAGE_PAGE_SIZE = 20;
   const [loadingTriageResults, setLoadingTriageResults] = useState(false);
   // Default to last 3 days for better signal-to-noise
-  const [triageDaysFilter, setTriageDaysFilter] = useState(3);
+  const [triageDaysFilter, setTriageDaysFilter] = useState(restored ? restored.days : 3);
   
   const navigate = useNavigate();
-  const { getCachedTriageResults, setCachedTriageResults } = useEmailCache();
 
   useEffect(() => {
+    if (restored) {
+      const frame = requestAnimationFrame(() => window.scrollTo(0, restored.scroll));
+      return () => cancelAnimationFrame(frame);
+    }
     if (user?.authenticated) loadTriageResults(null, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
@@ -90,7 +97,8 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
   const handleOpenThread = (threadId, account = selectedEmail) => {
     const params = new URLSearchParams();
     if (account) params.set('email', account);
-    navigate(`/thread/${threadId}?${params.toString()}`);
+    rememberReturnView(location.key, { results: triageResults, page: triagePage, days: triageDaysFilter });
+    navigate(`/thread/${threadId}?${params.toString()}`, { state: { backTo: location.pathname } });
   };
 
   const handleDaysFilterChange = (days) => {
@@ -99,7 +107,7 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
   };
 
   useEffect(() => {
-    if (triageLastComplete?.processed_count && triagePage === 0) {
+    if ((triageLastComplete?.processed_count || triageLastComplete?.serverSync) && triagePage === 0) {
       loadTriageResults(null, true, false, false, triageDaysFilter, true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
