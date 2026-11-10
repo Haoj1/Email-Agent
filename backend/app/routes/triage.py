@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List, AsyncGenerator
 from pydantic import BaseModel, Field
+from googleapiclient.errors import HttpError
 from datetime import datetime, timedelta, timezone
 import json
 import asyncio
@@ -29,6 +30,8 @@ class TriageRequest(BaseModel):
     email: Optional[str] = None
     cursor: Optional[str] = Field(default=None, max_length=4096)
     review_unclear: bool = False
+    automatic: bool = False
+    checkpoint: Optional[str] = Field(default=None, max_length=4096)
 
 
 class TriageResponse(BaseModel):
@@ -43,9 +46,9 @@ def _triage_event(kind, **fields):
     return f"data: {json.dumps({'type': kind, **fields})}\n\n"
 
 
-def _triage_cursor(value, user_id, email):
+def _triage_token(value, user_id, email, kind):
     data = jwt.decode(value, settings.SESSION_SECRET, algorithms=["HS256"], options={"require_exp": True})
-    if data.get("kind") != "triage" or data.get("user_id") != user_id or data.get("email") != email:
+    if data.get("kind") != kind or data.get("user_id") != user_id or data.get("email") != email:
         raise JWTError("Invalid mailbox cursor")
     return data
 
@@ -54,6 +57,7 @@ async def stream_triage_progress(
     triage_request: TriageRequest, request: Request, db: AsyncSession, user_id: int
 ) -> AsyncGenerator[str, None]:
     """Process and commit a bounded Gmail page before advertising its continuation."""
+    page_token = None
     try:
         credentials = await get_user_credentials(request, triage_request.email, db)
         email = triage_request.email or await db.scalar(
@@ -62,15 +66,23 @@ async def stream_triage_progress(
         days = max(1, min(triage_request.days or 7, 30))
         page_size = max(1, min(triage_request.max_results or 25, 25))
         now = datetime.now(timezone.utc)
+        through = int(now.timestamp())
         start = int((now - timedelta(days=days)).timestamp())
-        query = f"after:{start} before:{int(now.timestamp())}"
-        page_token = None
+        if triage_request.checkpoint:
+            try:
+                checkpoint = _triage_token(triage_request.checkpoint, user_id, email, "triage-checkpoint")
+                # A short overlap catches late-arriving search results. Unchanged rows are skipped.
+                start = max(start, min(int(checkpoint["through"]), through) - 600)
+            except (JWTError, KeyError, TypeError, ValueError):
+                pass
+        query = f"after:{start} before:{through}"
         if triage_request.cursor:
             try:
-                saved = _triage_cursor(triage_request.cursor, user_id, email)
+                saved = _triage_token(triage_request.cursor, user_id, email, "triage")
                 query, page_token, page_size = saved["query"], saved["page_token"], saved["page_size"]
-            except (JWTError, KeyError, TypeError):
-                yield _triage_event("error", code="cursor_expired", error="This scan expired. Start a fresh scan.")
+                through = int(query.rsplit("before:", 1)[1])
+            except (JWTError, KeyError, TypeError, ValueError, IndexError):
+                yield _triage_event("error", code="cursor_expired", error="This scan expired. A fresh scan can continue.")
                 return
 
         yield _triage_event("status", message="Checking recent email subjects and previews…")
@@ -98,7 +110,7 @@ async def stream_triage_progress(
                 results.append(result)
                 if result["label"] == "REVIEW":
                     uncertain.append(thread)
-            elif previous.label == "REVIEW":
+            elif previous.label == "REVIEW" and not triage_request.automatic:
                 uncertain.append(thread)
 
         skipped = len(threads) - len(results)
@@ -144,10 +156,19 @@ async def stream_triage_progress(
             "kind": "triage", "user_id": user_id, "email": email, "query": query,
             "page_token": next_token, "page_size": page_size, "exp": now + timedelta(hours=8),
         }, settings.SESSION_SECRET, algorithm="HS256") if next_token else None
+        checkpoint = jwt.encode({
+            "kind": "triage-checkpoint", "user_id": user_id, "email": email, "through": through,
+            "exp": now + timedelta(days=7),
+        }, settings.SESSION_SECRET, algorithm="HS256") if not next_token else None
         yield _triage_event("complete", success=True, scanned_count=len(threads), skipped_count=skipped,
-                            processed_count=len(saved_rows), next_cursor=cursor,
+                            processed_count=len(saved_rows), next_cursor=cursor, checkpoint=checkpoint,
                             ai_calls=ai_calls, ai_reviewed=ai_reviewed, ai_unavailable=ai_unavailable,
                             results=[{key: value for key, value in row.items() if key != "user_id"} for row in saved_rows])
+    except HttpError as exc:
+        if page_token and exc.resp.status in (400, 404):
+            yield _triage_event("error", code="cursor_expired", error="This scan expired. A fresh scan can continue.")
+        else:
+            yield _triage_event("error", error="Gmail could not be checked. Try again shortly.")
     except Exception as exc:
         print(f"Triage page failed: {type(exc).__name__}")
         yield _triage_event("error", error="Could not scan this page. Try again to continue.")

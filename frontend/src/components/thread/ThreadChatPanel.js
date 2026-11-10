@@ -4,11 +4,12 @@ import ReactMarkdown from 'react-markdown';
 import { api } from '../../services/api';
 import './ThreadChatPanel.css';
 
-function ThreadChatPanel({ threadId, email, onClose }) {
+function ThreadChatPanel({ threadId, email, userId, onClose }) {
+  const cacheKey = userId ? `thread_chat_${userId}_${email || 'primary'}_${threadId}` : null;
   // Load conversation history from localStorage on mount (persists across browser sessions)
   const getCachedMessages = () => {
     try {
-      const cacheKey = `thread_chat_${threadId}`;
+      if (!cacheKey) return [];
       const cached = localStorage.getItem(cacheKey);
       if (cached) {
         const parsed = JSON.parse(cached);
@@ -26,12 +27,11 @@ function ThreadChatPanel({ threadId, email, onClose }) {
 
   const saveCachedMessages = useCallback((msgs) => {
     try {
-      const cacheKey = `thread_chat_${threadId}`;
-      localStorage.setItem(cacheKey, JSON.stringify(msgs));
+      if (cacheKey) localStorage.setItem(cacheKey, JSON.stringify(msgs.slice(-40)));
     } catch (e) {
       console.error('Error saving cached messages:', e);
     }
-  }, [threadId]);
+  }, [cacheKey]);
 
   const [messages, setMessages] = useState(getCachedMessages);
   const [input, setInput] = useState('');
@@ -413,8 +413,7 @@ function ThreadChatPanel({ threadId, email, onClose }) {
     setMessages([]);
     // Clear localStorage
     try {
-      const cacheKey = `thread_chat_${threadId}`;
-      localStorage.removeItem(cacheKey);
+      if (cacheKey) localStorage.removeItem(cacheKey);
     } catch (e) {
       console.error('Error clearing cached messages:', e);
     }

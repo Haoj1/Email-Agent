@@ -1,7 +1,7 @@
 """
 Database models for MVP - Minimal but sufficient design
 """
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, UniqueConstraint, Float, Index, Boolean
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, UniqueConstraint, Float, Index, Boolean, CheckConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -115,6 +115,24 @@ class AssistChatSession(Base):
     __table_args__ = (
         Index('idx_assist_user_updated', 'user_id', 'updated_at'),  # List recent sessions
         Index('idx_assist_user_created_at', 'user_id', 'created_at'),
+    )
+
+
+class AssistChatMessage(Base):
+    """Append-only Copilot messages. Existing session JSON remains readable."""
+    __tablename__ = "assist_chat_messages"
+
+    id = Column(Integer, primary_key=True)
+    session_id = Column(Integer, ForeignKey("assist_chat_sessions.id", ondelete="CASCADE"), nullable=False)
+    role = Column(String(12), nullable=False)
+    content = Column(Text, nullable=False)
+    sources = Column(JSONB, nullable=True)
+    used_web_search = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("role IN ('user', 'assistant')", name="valid_assist_chat_role"),
+        Index("idx_assist_chat_messages_session_order", "session_id", "id"),
     )
 
 

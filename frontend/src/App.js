@@ -34,7 +34,7 @@ function initialTheme() {
 
 // Inner component that has access to EmailCache context
 function AppContent() {
-  const { resetPendingTriageCount, clearCooldownCache } = useEmailCache();
+  const { runTriage, cancelTriage, clearCache } = useEmailCache();
   const [user, setUser] = useState(null);
   const [theme, setTheme] = useState(initialTheme);
   const toggleTheme = () => {
@@ -54,6 +54,23 @@ function AppContent() {
   useEffect(() => {
     checkAuth();
   }, []);
+
+  useEffect(() => {
+    if (!user?.authenticated || !user.emails?.length) return;
+    const emails = user.emails.map(account => account.email).filter(Boolean);
+    const check = () => runTriage({ emails, userId: user.user_id }).catch(error => {
+      console.error('Unable to start automatic email check:', error);
+    });
+    check();
+    const timer = window.setInterval(check, 30 * 1000);
+    document.addEventListener('visibilitychange', check);
+    window.addEventListener('online', check);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', check);
+      window.removeEventListener('online', check);
+    };
+  }, [user, runTriage]);
 
   const checkAuth = async () => {
     try {
@@ -78,8 +95,8 @@ function AppContent() {
     try {
       await api.post('/auth/logout');
       setUser(null);
-      resetPendingTriageCount(); // Reset pending count on logout
-      clearCooldownCache(); // Clear cooldown cache
+      cancelTriage();
+      clearCache();
       window.location.href = '/';
     } catch (error) {
       console.error('Logout error:', error);
@@ -146,7 +163,7 @@ function AppContent() {
                             />
                           }
                         />
-                        <Route path="/thread/:threadId" element={<ThreadDetail primaryEmail={user.primary_email} />} />
+                        <Route path="/thread/:threadId" element={<ThreadDetail primaryEmail={user.primary_email} userId={user.user_id} />} />
                         <Route path="*" element={<Navigate to="/dashboard" replace />} />
                       </Routes>
                     </Suspense>

@@ -10,7 +10,7 @@ function senderName(value) {
 }
 
 export default function EmailThreadsCard({
-  loadingThreads, onRefreshEmails, onLoadMore, hasMore, emailThreads, onOpenThread,
+  loadingThreads, onLoadMore, hasMore, emailThreads, onOpenThread,
   daysFilter, onDaysFilterChange, searchQuery, onSearchChange, onSearchSubmit, onClearSearch, searchMode, onSearchModeChange,
 }) {
   const isStandalonePage = useLocation().pathname === '/threads';
@@ -61,7 +61,6 @@ export default function EmailThreadsCard({
           </select>
         </label>
         <span role="status">{loadingThreads ? 'Loading…' : `${threads.length} conversation${threads.length === 1 ? '' : 's'}`}</span>
-        <button type="button" className="workspace-quiet" disabled={loadingThreads} onClick={onRefreshEmails}>Refresh</button>
       </div>
       {searchMode === 'fuzzy' && <p className="workspace-search-hint">
         Looks for close spellings in the latest 30 email subjects, senders, and previews.

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEmailCache } from '../contexts/EmailCacheContext';
 import { api } from '../services/api';
@@ -7,9 +7,6 @@ import './Dashboard.css';
 
 function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
   const { 
-    pendingTriageCount, 
-    checkingPending, 
-    checkPendingTriage, 
     triageRunning,
     reviewUnclear,
     setReviewUnclear,
@@ -18,8 +15,6 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
     triageLastComplete,
     triageLastError,
     triageAccountInfo,
-    runTriage,
-    getTriageCursors
   } = useEmailCache();
   const [triageResults, setTriageResults] = useState(null);
   const [triagePage, setTriagePage] = useState(0);
@@ -29,41 +24,12 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
   const [triageDaysFilter, setTriageDaysFilter] = useState(3);
   
   const navigate = useNavigate();
-  const pendingTriageCheckIntervalRef = useRef(null);
   const { getCachedTriageResults, setCachedTriageResults } = useEmailCache();
 
   useEffect(() => {
-    return () => {
-      if (pendingTriageCheckIntervalRef.current) {
-        clearInterval(pendingTriageCheckIntervalRef.current);
-        pendingTriageCheckIntervalRef.current = null;
-      }
-    };
-  }, []);
-
-
-  useEffect(() => {
-    if (user && user.authenticated) {
-      loadTriageResults(null, false);
-      // Check immediately on mount (respects global cooldown). Stats are global across all accounts.
-      checkPendingTriage(null);
-      
-      // Then check every 5 minutes (300000 ms) - global cooldown will handle skipping if needed
-      const CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
-      pendingTriageCheckIntervalRef.current = setInterval(() => {
-        checkPendingTriage(null);
-      }, CHECK_INTERVAL);
-    }
-    
-    // Cleanup interval on unmount or when user/email changes
-    return () => {
-      if (pendingTriageCheckIntervalRef.current) {
-        clearInterval(pendingTriageCheckIntervalRef.current);
-        pendingTriageCheckIntervalRef.current = null;
-      }
-    };
+    if (user?.authenticated) loadTriageResults(null, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, selectedEmail]);
+  }, [user]);
 
   const sortTriageData = (triageData) => {
     if (!triageData?.success || !Array.isArray(triageData.data?.results)) return triageData;
@@ -76,15 +42,10 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
     };
   };
 
-  const handleRunTriage = () => runTriage({
-    emails: user?.emails?.map(account => account.email).filter(Boolean) || [],
-    userId: user?.user_id,
-  });
-
-  const loadTriageResults = async (label = null, forceRefresh = false, returnData = false, isLoadMore = false, days = triageDaysFilter) => {
-    if (!forceRefresh && !label && !isLoadMore && !days) {
+  const loadTriageResults = async (label = null, forceRefresh = false, returnData = false, isLoadMore = false, days = triageDaysFilter, preserve = false) => {
+    if (!forceRefresh && !label && !isLoadMore) {
       const cached = getCachedTriageResults(null);
-      if (cached) {
+      if (cached?.days === days) {
         setTriageResults(cached);
         return returnData ? cached : undefined;
       }
@@ -92,7 +53,7 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
 
     setLoadingTriageResults(true);
     if (forceRefresh && !isLoadMore) {
-      setTriageResults(null);
+      if (!preserve) setTriageResults(null);
       setTriagePage(0);
     }
     
@@ -111,7 +72,8 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
       }
       
       const triageData = sortTriageData({ 
-        success: true, 
+        success: true,
+        days,
         data: { ...newData, results: mergedResults, count: mergedResults.length }
       });
       
@@ -119,7 +81,7 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
       setTriagePage(isLoadMore ? currentPage : 0);
       if (!label && !isLoadMore) setCachedTriageResults(null, triageData);
     } catch (error) {
-      setTriageResults({ success: false, error: error.message });
+      if (!preserve) setTriageResults({ success: false, error: error.message });
     } finally {
       setLoadingTriageResults(false);
     }
@@ -137,7 +99,9 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
   };
 
   useEffect(() => {
-    if (triageLastComplete) loadTriageResults(null, true);
+    if (triageLastComplete?.processed_count && triagePage === 0) {
+      loadTriageResults(null, true, false, false, triageDaysFilter, true);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triageLastComplete?.run_id]);
 
@@ -152,19 +116,14 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
           triageResults={triageResults}
           triageProgress={triageProgress}
           triageLastComplete={triageLastComplete}
+            hasMailboxes={Boolean(user?.emails?.length)}
           triageLastError={triageLastError}
-          hasContinuation={Object.keys(getTriageCursors(user?.user_id)).length > 0}
             reviewUnclear={reviewUnclear}
             onReviewUnclearChange={setReviewUnclear}
           triageStatus={triageStatus}
           triageAccountInfo={triageAccountInfo}
-          pendingCount={pendingTriageCount}
-          checkingPending={checkingPending}
           daysFilter={triageDaysFilter}
           onDaysFilterChange={handleDaysFilterChange}
-          onRunTriage={handleRunTriage}
-          onRefreshStats={() => checkPendingTriage(null, true)}
-          onLoadTriageResults={() => loadTriageResults(null, true)}
           onLoadMore={() => loadTriageResults(null, false, false, true)}
           onOpenThread={handleOpenThread}
         />

@@ -8,7 +8,7 @@ import './ThreadDetail.css';
 
 const ThreadChatPanel = lazy(() => import('../components/thread/ThreadChatPanel'));
 
-function ThreadDetail({ primaryEmail }) {
+function ThreadDetail({ primaryEmail, userId }) {
   const { threadId } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -255,7 +255,7 @@ function ThreadDetail({ primaryEmail }) {
       {showChat !== null && (
         <div className={`thread-chat-wrapper ${showChat ? 'open' : ''}`} hidden={!showChat}>
           <Suspense fallback={<p className="workspace-panel-loading" role="status">Loading assistant…</p>}>
-            <ThreadChatPanel threadId={threadId} email={thread.email_account || email} onClose={() => setShowChat(false)} />
+            <ThreadChatPanel threadId={threadId} email={account} userId={userId} onClose={() => setShowChat(false)} />
           </Suspense>
           <div className="thread-chat-overlay" onClick={() => setShowChat(false)} />
         </div>

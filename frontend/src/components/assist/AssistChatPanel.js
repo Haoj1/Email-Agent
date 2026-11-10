@@ -42,74 +42,84 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen }) {
   const [sessionId, setSessionId] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [showSessionList, setShowSessionList] = useState(false);
+  const [sessionsOffset, setSessionsOffset] = useState(null);
+  const [messageOffset, setMessageOffset] = useState(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const historyRequest = useRef(null);
+  const savedScroll = useRef(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const panelRef = useRef(null);
   const requestRef = useRef(null);
   const messagesPane = useRef(null);
-  useEffect(() => () => requestRef.current?.abort(), []);
+  useEffect(() => () => {
+    requestRef.current?.abort();
+    historyRequest.current?.abort();
+  }, []);
   useEffect(() => {
     if (isOpen && !loading && !isMinimized) inputRef.current?.focus();
   }, [isOpen, loading, isMinimized]);
 
   useEffect(() => {
     const pane = messagesPane.current;
-    if (pane && messagesEndRef.current) pane.scrollTop = pane.scrollHeight;
+    if (!pane || !messagesEndRef.current) return;
+    const saved = savedScroll.current;
+    pane.scrollTop = saved ? saved.top + pane.scrollHeight - saved.height : pane.scrollHeight;
+    savedScroll.current = null;
   }, [messages, thinkingSteps]);
 
-  const loadSessions = async () => {
+  const loadSessions = async (offset = 0) => {
+    if (loadingSessions) return;
+    setLoadingSessions(true);
+    setHistoryError('');
     try {
-      const response = await api.get('/assist-chat/sessions', { params: { limit: 20 } });
-      if (response.data.success) {
-        setSessions(response.data.sessions || []);
-      }
-    } catch (error) {
-      console.error('Error loading sessions:', error);
+      const { data } = await api.get('/assist-chat/sessions', { params: { limit: 20, offset } });
+      setSessions(previous => offset ? [...previous, ...(data.sessions || [])] : data.sessions || []);
+      setSessionsOffset(data.next_offset ?? null);
+    } catch {
+      setHistoryError('Could not open conversation history.');
+    } finally {
+      setLoadingSessions(false);
     }
   };
 
-  const loadSession = async (sessionIdToLoad) => {
+  const loadSession = async (id, offset = 0) => {
+    historyRequest.current?.abort();
+    const controller = new AbortController();
+    historyRequest.current = controller;
+    setLoadingHistory(true);
+    setHistoryError('');
     try {
-      const response = await api.get(`/assist-chat/sessions/${sessionIdToLoad}`);
-      if (response.data.success) {
-        const history = response.data.conversation_history || [];
-        // Process messages to extract thread IDs and convert to links
-        const processedMessages = history.map((msg) => {
-          // Extract thread IDs from the message (if it has tool_calls or citations)
-          const threadIds = extractThreadIdsFromMessage({
-            ...msg,
-            tool_calls: msg.tool_calls || [],
-            citations: msg.citations || []
-          });
-          
-          // Process content to add thread ID links
-          const processedContent = processThreadIds(msg.content, threadIds);
-          
-          const toolCalls = msg.tool_calls || [];
-          const usedWebSearch = msg.used_web_search === true || toolCalls.some((t) => (t.tool || t.name) === 'web_search');
-          return {
-            role: msg.role,
-            content: processedContent,
-            timestamp: new Date(msg.timestamp || Date.now()),
-            tool_calls: toolCalls,
-            citations: msg.citations || [],
-            sources: msg.sources || [],
-            used_web_search: usedWebSearch,
-          };
-        });
-        setMessages(processedMessages);
-        setSessionId(sessionIdToLoad);
-        setThinkingSteps([]);
-        setRequestNotice('');
-        setShowSessionList(false);
+      const { data } = await api.get(`/assist-chat/sessions/${encodeURIComponent(id)}`, {
+        params: { limit: 30, offset }, signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      const loaded = (data.conversation_history || []).map(entry => ({
+        ...entry, timestamp: entry.timestamp ? new Date(entry.timestamp) : null,
+      }));
+      if (offset && messagesPane.current) {
+        savedScroll.current = { top: messagesPane.current.scrollTop, height: messagesPane.current.scrollHeight };
       }
-    } catch (error) {
-      console.error('Error loading session:', error);
-      alert('Failed to load session');
+      setMessages(previous => offset ? [...loaded, ...previous] : loaded);
+      setMessageOffset(data.next_offset ?? null);
+      setSessionId(id);
+      setShowSessionList(false);
+      setThinkingSteps([]);
+      setRequestNotice('');
+    } catch {
+      if (!controller.signal.aborted) setHistoryError('Could not load this conversation.');
+    } finally {
+      if (!controller.signal.aborted) setLoadingHistory(false);
     }
   };
 
   const startNewSession = () => {
+    historyRequest.current?.abort();
+    setLoadingHistory(false);
+    setHistoryError('');
+    setMessageOffset(null);
     setMessages([]);
     setSessionId(null);
     setThinkingSteps([]);
@@ -119,7 +129,7 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen }) {
 
   const handleSend = async (value = input, action) => {
     const userMessage = value.trim();
-    if (!userMessage || requestRef.current) return;
+    if (!userMessage || requestRef.current || loadingHistory) return;
     const controller = new AbortController();
     requestRef.current = controller;
     setInput('');
@@ -168,6 +178,12 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen }) {
 
       if (!finalResult?.success) throw new Error(finalResult?.error || 'Copilot did not return a response.');
       setSessionId(finalResult.session_id || null);
+      if (finalResult.history_saved === false) setRequestNotice('This reply is here, but could not be saved to history.');
+      if (sessionId && finalResult.session_id === sessionId) {
+        setMessageOffset(previous => previous === null ? null : previous + 2);
+      } else {
+        setMessageOffset(null);
+      }
       setMessages(previous => [...previous, {
         role: 'assistant', content: finalResult.answer,
         citations: finalResult.citations || [], sources: finalResult.sources || [],
@@ -228,13 +244,6 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen }) {
       document.body.style.userSelect = '';
     };
   }, [isResizing]);
-
-  const handleClearHistory = () => {
-    setMessages([]);
-    setSessionId(null);
-    setThinkingSteps([]);
-    setRequestNotice('');
-  };
 
   // Function to extract thread IDs from a single message
   const extractThreadIdsFromMessage = (msg) => {
@@ -443,20 +452,14 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen }) {
             onClick={() => { if (!showSessionList) loadSessions(); setShowSessionList(!showSessionList); }}
             disabled={loading}
             aria-expanded={showSessionList}
-            title="Session history"
+            title="Chat history"
           >
             <WorkspaceIcon name="history" />
           </button>
-          {messages.length > 0 && (
-            <button
-              className="chat-action-btn clear-btn"
-              onClick={handleClearHistory}
-              disabled={loading}
-              title="Clear conversation"
-            >
-              <WorkspaceIcon name="trash" />
-            </button>
-          )}
+          <button type="button" className="chat-action-btn" onClick={startNewSession}
+            title="New chat" disabled={loading || loadingHistory}>
+            <WorkspaceIcon name="add" />
+          </button>
           <button
             className="chat-action-btn"
             onClick={() => setIsMinimized(!isMinimized)}
@@ -475,13 +478,20 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen }) {
           <button type="button" className="btn-secondary" onClick={startNewSession} disabled={loading}>
             <WorkspaceIcon name="add" /> New conversation
           </button>
+          {loadingSessions && <p className="workspace-copilot-status" role="status">Loading history…</p>}
+          {!loadingSessions && !sessions.length && !historyError && <p className="workspace-copilot-status">No saved conversations yet.</p>}
           {sessions.map(session => (
             <button type="button" key={session.session_id} className="workspace-session-row"
+              aria-current={session.session_id === sessionId ? 'true' : undefined}
               onClick={() => loadSession(session.session_id)} disabled={loading}>
               <strong>{session.preview}</strong>
               <small>{new Date(session.updated_at).toLocaleString()}</small>
             </button>
           ))}
+          {sessionsOffset !== null && <button type="button" className="workspace-quiet"
+            onClick={() => loadSessions(sessionsOffset)} disabled={loadingSessions}>Older chats</button>}
+          {historyError && <p className="workspace-copilot-status" role="alert">{historyError}</p>}
+
         </div>
       )}
 
@@ -492,9 +502,9 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen }) {
               <div className="chat-empty-state">
                 <p className="workspace-copilot-description">Search mail, find attachments, and check your schedule.</p>
                 <div className="quick-actions">
-                  {quickActions.map((action, idx) => (
+                  {quickActions.map(action => (
                     <button
-                      key={idx}
+                      key={action.action}
                       className="quick-action-btn"
                       onClick={() => handleSend(action.prompt, action.action)}
                       disabled={loading}
@@ -506,10 +516,15 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen }) {
               </div>
             ) : (
               <>
+                {messageOffset !== null && <button type="button" className="workspace-quiet workspace-earlier"
+                  disabled={loading || loadingHistory} onClick={() => loadSession(sessionId, messageOffset)}>
+                  {loadingHistory ? 'Loading earlier messages…' : 'Earlier messages'}
+                </button>}
+                {historyError && !showSessionList && <p className="workspace-copilot-status" role="alert">{historyError}</p>}
                 {messages.map((msg, idx) => {
                   return (
                     <div
-                      key={idx}
+                      key={msg.id ? `saved-${msg.id}` : `local-${idx}`}
                       className={`chat-message ${msg.role} ${msg.isError ? 'error' : ''}`}
                     >
                       <div className="message-content">
@@ -544,9 +559,9 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen }) {
                           </div>
                         )}
                       </div>
-                      <div className="message-timestamp">
-                        {msg.timestamp.toLocaleTimeString()}
-                      </div>
+                      {msg.timestamp && <div className="message-timestamp">
+                        {msg.timestamp.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
+                      </div>}
                     </div>
                   );
                 })}
@@ -599,12 +614,12 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen }) {
                 onKeyDown={handleKeyPress}
                 placeholder="Ask about your emails..."
                 rows={1}
-                disabled={loading}
+                disabled={loading || loadingHistory}
               />
               <button
                 className="send-button"
                 onClick={() => handleSend()}
-                disabled={!input.trim() || loading}
+                disabled={!input.trim() || loading || loadingHistory}
                 aria-label="Send message"
               >
                 {loading ? '…' : <WorkspaceIcon name="send" />}

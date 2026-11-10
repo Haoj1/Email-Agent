@@ -1,7 +1,7 @@
 """
 Assist Chat API routes - General-purpose email assistant
 """
-from fastapi import APIRouter, HTTPException, Depends, Request, Body
+from fastapi import APIRouter, HTTPException, Depends, Request, Body, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Literal, Optional, List, AsyncGenerator
@@ -10,10 +10,12 @@ import json
 import uuid
 import asyncio
 from sqlalchemy import func, select
+from sqlalchemy.orm import defer
 from app.database import get_db
 from app.routes.auth import get_user_credentials, get_current_user_id
 from app.services.gmail_service import GmailService
-from app.models import UserEmail, AssistChatSession
+from app.models import UserEmail, AssistChatSession, AssistChatMessage
+from app.services.chat_history import list_history_statement, load_history
 
 router = APIRouter()
 
@@ -23,7 +25,7 @@ class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=8000)
     action: Literal["unread", "attachments", "agenda", "reply_queue"] | None = None
     session_id: Optional[str] = None  # If provided, continue existing session
-    conversation_history: Optional[List[dict]] = None
+    conversation_history: Optional[List[dict]] = Field(default=None, max_length=60)
     email: Optional[str] = None  # Optional email account to use for Gmail tools
 
 
@@ -58,13 +60,13 @@ async def stream_chat_response(
         session_id = chat_request.session_id
         history = chat_request.conversation_history or []
         if session_id:
-            session = await db.scalar(select(AssistChatSession).where(
+            session = await db.scalar(select(AssistChatSession).options(defer(AssistChatSession.conversation_history)).where(
                 AssistChatSession.session_id == session_id, AssistChatSession.user_id == user_id,
             ))
             if session is None:
                 yield _event({"type": "error", "error": "This conversation is unavailable. Start a new chat."})
                 return
-            history = session.conversation_history or []
+            history, _ = await load_history(db, session.id, 12)
         else:
             session_id = str(uuid.uuid4())
 
@@ -134,23 +136,33 @@ async def stream_chat_response(
         used_web_search = any(
             call["tool"] == "web_search" and call["result"]["success"] for call in result["tool_calls"]
         )
-        new_history = history + [
-            {"role": "user", "content": chat_request.question},
-            {"role": "assistant", "content": result["answer"], "sources": result["sources"],
-             "used_web_search": used_web_search},
-        ]
+        history_saved = False
         try:
             if session is None:
-                db.add(AssistChatSession(user_id=user_id, session_id=session_id, conversation_history=new_history))
-            else:
-                session.conversation_history = new_history
-                session.updated_at = func.now()
+                session = AssistChatSession(user_id=user_id, session_id=session_id)
+                db.add(session)
+                await db.flush()
+                # Keep recovery history sent by a client whose earlier turn could not be saved.
+                db.add_all([
+                    AssistChatMessage(session_id=session.id, role=entry["role"], content=entry["content"][:8000])
+                    for entry in history if entry.get("role") in ("user", "assistant")
+                    and isinstance(entry.get("content"), str)
+                ])
+            db.add_all([
+                AssistChatMessage(session_id=session.id, role="user", content=chat_request.question),
+                AssistChatMessage(session_id=session.id, role="assistant", content=result["answer"],
+                                  sources=result["sources"], used_web_search=used_web_search),
+            ])
+            session.updated_at = func.now()
             await db.commit()
+            history_saved = True
         except Exception as exc:
             print(f"Failed to save Copilot chat: {type(exc).__name__}")
+            await db.rollback()
             session_id = None
 
-        yield _event({"type": "result", **result, "session_id": session_id, "used_web_search": used_web_search})
+        yield _event({"type": "result", **result, "session_id": session_id, "used_web_search": used_web_search,
+                      "history_saved": history_saved})
     except asyncio.TimeoutError:
         yield _event({"type": "error", "error": "Copilot timed out. Try a narrower question."})
     except Exception as exc:
@@ -189,95 +201,44 @@ async def ask_assist_chat(
 @router.get("/assist-chat/sessions")
 async def list_sessions(
     request: Request,
-    limit: int = 20,
-    db: AsyncSession = Depends(get_db)
+    limit: int = Query(20, ge=1, le=50),
+    offset: int = Query(0, ge=0, le=10000),
+    db: AsyncSession = Depends(get_db),
 ):
-    """
-    List recent chat sessions for the current user
-    """
-    try:
-        user_id = await get_current_user_id(request, db)
-        
-        result = await db.execute(
-            select(AssistChatSession)
-            .where(AssistChatSession.user_id == user_id)
-            .order_by(AssistChatSession.updated_at.desc())
-            .limit(limit)
-        )
-        sessions = result.scalars().all()
-        
-        session_list = []
-        for session in sessions:
-            # Get first user message as preview
-            preview = "New conversation"
-            if session.conversation_history:
-                for msg in session.conversation_history:
-                    if msg.get("role") == "user":
-                        preview = msg.get("content", "")[:100]
-                        break
-            
-            session_list.append({
-                "session_id": session.session_id,
-                "preview": preview,
-                "created_at": session.created_at.isoformat() if session.created_at else None,
-                "updated_at": session.updated_at.isoformat() if session.updated_at else None,
-                "message_count": len(session.conversation_history) if session.conversation_history else 0
-            })
-        
-        return {
-            "success": True,
-            "sessions": session_list
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        error_str = str(e)
-        print(f"Error listing sessions: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to list sessions: {error_str}"
-        )
+    user_id = await get_current_user_id(request, db)
+    rows = (await db.execute(list_history_statement(user_id, limit, offset))).all()
+    return {
+        "success": True,
+        "sessions": [{
+            "session_id": row.session_id, "preview": row.preview,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        } for row in rows[:limit]],
+        "next_offset": offset + limit if len(rows) > limit else None,
+    }
 
 
 @router.get("/assist-chat/sessions/{session_id}")
 async def get_session(
     session_id: str,
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    limit: int = Query(30, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=100000),
+    db: AsyncSession = Depends(get_db),
 ):
-    """
-    Get a specific chat session with full conversation history
-    """
-    try:
-        user_id = await get_current_user_id(request, db)
-        
-        result = await db.execute(
-            select(AssistChatSession).where(
-                AssistChatSession.session_id == session_id,
-                AssistChatSession.user_id == user_id
-            )
-        )
-        session = result.scalar_one_or_none()
-        
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
-        
-        return {
-            "success": True,
-            "session_id": session.session_id,
-            "conversation_history": session.conversation_history or [],
-            "created_at": session.created_at.isoformat() if session.created_at else None,
-            "updated_at": session.updated_at.isoformat() if session.updated_at else None
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        error_str = str(e)
-        print(f"Error getting session: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get session: {error_str}"
-        )
+    user_id = await get_current_user_id(request, db)
+    session = (await db.execute(select(
+        AssistChatSession.id, AssistChatSession.created_at, AssistChatSession.updated_at,
+    ).where(AssistChatSession.session_id == session_id, AssistChatSession.user_id == user_id))).one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    messages, next_offset = await load_history(db, session.id, limit, offset)
+    return {
+        "success": True, "session_id": session_id, "conversation_history": messages,
+        "next_offset": next_offset,
+        "created_at": session.created_at.isoformat() if session.created_at else None,
+        "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+    }
 
 
 @router.delete("/assist-chat/sessions/{session_id}")

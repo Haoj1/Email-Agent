@@ -16,7 +16,7 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
   const [searchMode, setSearchMode] = useState('exact');
   
   const navigate = useNavigate();
-  const { getCachedThreads, setCachedThreads } = useEmailCache();
+  const { getCachedThreads, setCachedThreads, triageLastComplete } = useEmailCache();
 
   useEffect(() => {
     if (user && user.authenticated) {
@@ -24,6 +24,15 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, selectedEmail]);
+
+  useEffect(() => {
+    const mailbox = selectedEmail || user?.primary_email;
+    if (triageLastComplete?.changedAccounts.includes(mailbox) && !threadsRequest.current?.query
+      && (emailThreads?.data?.threads?.length || 0) <= 30) {
+      loadEmailThreads(selectedEmail, true, false, daysFilter, '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triageLastComplete?.run_id]);
 
   const loadEmailThreads = async (
     email = null,
@@ -131,7 +140,6 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
       <div className="dashboard-content full-width">
         <EmailThreadsCard
           loadingThreads={loadingThreads}
-          onRefreshEmails={() => loadEmailThreads(selectedEmail, true)}
           onLoadMore={() => loadEmailThreads(selectedEmail, false, true, daysFilter, threadsRequest.current?.query, threadsRequest.current?.mode)}
           hasMore={!!emailThreadsNextPageToken}
           emailThreads={emailThreads}

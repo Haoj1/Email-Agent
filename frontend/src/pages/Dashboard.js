@@ -14,9 +14,6 @@ const AssistChatPanel = lazy(() => import('../components/assist/AssistChatPanel'
 
 function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   const { 
-    pendingTriageCount, 
-    checkingPending, 
-    checkPendingTriage, 
     triageRunning,
     reviewUnclear,
     setReviewUnclear,
@@ -25,8 +22,6 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     triageLastComplete,
     triageLastError,
     triageAccountInfo,
-    runTriage,
-    getTriageCursors
   } = useEmailCache();
   const [emailThreads, setEmailThreads] = useState(null);
   const [loadingThreads, setLoadingThreads] = useState(false);
@@ -37,7 +32,6 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   const [triagePage, setTriagePage] = useState(0);
   const TRIAGE_PAGE_SIZE = 20;
   const [loadingTriageResults, setLoadingTriageResults] = useState(false);
-  const pendingTriageCheckIntervalRef = useRef(null);
   // Default to last 3 days for better signal-to-noise
   const [triageDaysFilter, setTriageDaysFilter] = useState(3);
   const [threadsSearchQuery, setThreadsSearchQuery] = useState('');
@@ -177,15 +171,10 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     };
   };
 
-  const handleRunTriage = () => runTriage({
-    emails: user?.emails?.map(account => account.email).filter(Boolean) || [],
-    userId: user?.user_id,
-  });
-
-  const loadTriageResults = async (label = null, forceRefresh = false, returnData = false, isLoadMore = false, days = triageDaysFilter) => {
-    if (!forceRefresh && !label && !isLoadMore && !days) {
+  const loadTriageResults = async (label = null, forceRefresh = false, returnData = false, isLoadMore = false, days = triageDaysFilter, preserve = false) => {
+    if (!forceRefresh && !label && !isLoadMore) {
       const cached = getCachedTriageResults(null);
-      if (cached) {
+      if (cached?.days === days) {
         setTriageResults(cached);
         return returnData ? cached : undefined;
       }
@@ -193,7 +182,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
 
     setLoadingTriageResults(true);
     if (forceRefresh && !isLoadMore) {
-      setTriageResults(null);
+      if (!preserve) setTriageResults(null);
       setTriagePage(0);
     }
     
@@ -212,7 +201,8 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
       }
       
       const triageData = sortTriageData({ 
-        success: true, 
+        success: true,
+        days,
         data: { ...newData, results: mergedResults, count: mergedResults.length }
       });
       
@@ -221,7 +211,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
       if (!label && !isLoadMore) setCachedTriageResults(null, triageData);
       return returnData ? triageData : undefined;
     } catch (error) {
-      setTriageResults({ success: false, error: error.message });
+      if (!preserve) setTriageResults({ success: false, error: error.message });
       return returnData ? null : undefined;
     } finally {
       setLoadingTriageResults(false);
@@ -229,35 +219,32 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   };
 
   useEffect(() => {
-    if (triageLastComplete) loadTriageResults(null, true);
+    if (triageLastComplete?.processed_count && triagePage === 0) {
+      loadTriageResults(null, true, false, false, triageDaysFilter, true);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triageLastComplete?.run_id]);
 
 
 
   useEffect(() => {
-    if (user && user.authenticated) {
-      loadEmailThreads(selectedEmail, false);
-      loadTriageResults(null, false);
-      // Check immediately on mount (respects global cooldown). Stats are global across all accounts.
-      checkPendingTriage(null);
-      
-      // Then check every 5 minutes (300000 ms) - global cooldown will handle skipping if needed
-      const CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
-      pendingTriageCheckIntervalRef.current = setInterval(() => {
-        checkPendingTriage(null);
-      }, CHECK_INTERVAL);
-    }
-    
-    // Cleanup interval on unmount or when user/email changes
-    return () => {
-      if (pendingTriageCheckIntervalRef.current) {
-        clearInterval(pendingTriageCheckIntervalRef.current);
-        pendingTriageCheckIntervalRef.current = null;
-      }
-    };
+    if (user?.authenticated) loadEmailThreads(selectedEmail, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, selectedEmail]);
+
+  useEffect(() => {
+    if (user?.authenticated) loadTriageResults(null, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  useEffect(() => {
+    const mailbox = selectedEmail || user?.primary_email;
+    if (triageLastComplete?.changedAccounts.includes(mailbox) && !threadsRequest.current?.query
+      && (emailThreads?.data?.threads?.length || 0) <= 30) {
+      loadEmailThreads(selectedEmail, true, false, threadDays, '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triageLastComplete?.run_id]);
 
   const handleOpenThread = (threadId, account = selectedEmail) => {
     const params = new URLSearchParams();
@@ -355,7 +342,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
             </div>
           </div>
           <div className="workspace-intro-summary" aria-label="Workspace status">
-            <div><WorkspaceIcon name="priority" /><strong>{checkingPending ? '…' : pendingTriageCount}</strong><span>New in recent check</span></div>
+            <div><WorkspaceIcon name="priority" /><strong>{triageRunning ? '…' : triageLastComplete?.processed_count ?? '—'}</strong><span>Updated last check</span></div>
             <div><WorkspaceIcon name="mail" /><strong>{user?.emails?.length ?? 0}</strong><span>Connected mailboxes</span></div>
           </div>
         </header>
@@ -425,7 +412,6 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
         >
           <EmailThreadsCard
             loadingThreads={loadingThreads}
-            onRefreshEmails={() => loadEmailThreads(selectedEmail, true)}
             onLoadMore={() =>
               loadEmailThreads(selectedEmail, false, true, threadDays, threadsRequest.current?.query, threadsRequest.current?.mode)
             }
@@ -472,19 +458,14 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
             triageResults={triageResults}
             triageProgress={triageProgress}
           triageLastComplete={triageLastComplete}
+            hasMailboxes={Boolean(user?.emails?.length)}
           triageLastError={triageLastError}
-          hasContinuation={Object.keys(getTriageCursors(user?.user_id)).length > 0}
             reviewUnclear={reviewUnclear}
             onReviewUnclearChange={setReviewUnclear}
             triageStatus={triageStatus}
             triageAccountInfo={triageAccountInfo}
-            pendingCount={pendingTriageCount}
-            checkingPending={checkingPending}
             daysFilter={triageDaysFilter}
             onDaysFilterChange={handleDaysFilterChange}
-            onRunTriage={handleRunTriage}
-            onRefreshStats={() => checkPendingTriage(null, true)}
-            onLoadTriageResults={() => loadTriageResults(null, true)}
             onLoadMore={() => loadTriageResults(null, false, false, true)}
             onOpenThread={handleOpenThread}
           />

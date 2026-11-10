@@ -4,8 +4,8 @@ import { Link, useLocation } from 'react-router-dom';
 
 export default function EmailTriageCard({
   runningTriage, loadingTriageResults, triageResults, triageProgress, triageStatus,
-  triageAccountInfo, triageLastComplete, triageLastError, hasContinuation, reviewUnclear, onReviewUnclearChange, pendingCount, checkingPending, daysFilter, onDaysFilterChange,
-  onRunTriage, onRefreshStats, onLoadTriageResults, onLoadMore, onOpenThread,
+  triageAccountInfo, triageLastComplete, triageLastError, hasMailboxes, reviewUnclear, onReviewUnclearChange,
+  daysFilter, onDaysFilterChange, onLoadMore, onOpenThread,
 }) {
   const isStandalonePage = useLocation().pathname === '/triage';
   const results = triageResults?.data?.results || [];
@@ -18,7 +18,10 @@ export default function EmailTriageCard({
         {!isStandalonePage && <Link className="workspace-link" to="/triage">See all <WorkspaceIcon name="arrow" /></Link>}
       </div>
       <div className="workspace-toolbar priority-toolbar">
-        <button type="button" className="btn-primary" onClick={onRunTriage} disabled={busy}><WorkspaceIcon name={runningTriage ? 'refresh' : 'priority'} className={runningTriage ? 'workspace-spinning' : ''} /> {runningTriage ? 'Scanning…' : hasContinuation ? 'Continue checking' : 'Check emails'}</button>
+        <span className="workspace-autosync">
+          <WorkspaceIcon name="refresh" className={runningTriage ? 'workspace-spinning' : ''} />
+          {hasMailboxes ? 'Updates automatically' : 'Connect a mailbox to get updates'}
+        </span>
         <label className="workspace-filter">
           <span className="workspace-sr-only">Priority date range</span>
           <select value={daysFilter ?? ''} onChange={event => onDaysFilterChange(event.target.value ? Number(event.target.value) : null)}>
@@ -27,15 +30,14 @@ export default function EmailTriageCard({
           </select>
         </label>
       </div>
-      <div className="workspace-list-meta">
-        <span role="status">{checkingPending ? 'Checking…' : pendingCount > 0 ? `${pendingCount} new in recent check` : 'No new threads in recent check'}</span>
-        <button type="button" className="workspace-quiet" onClick={onRefreshStats} disabled={busy || checkingPending}>Refresh count</button>
-      </div>
-      <label className="workspace-ai-review">
-        <input type="checkbox" checked={reviewUnclear} disabled={busy}
-          onChange={event => onReviewUnclearChange(event.target.checked)} />
-        <span>Use AI for unclear emails <small>{reviewUnclear ? 'Reviews up to 25 email previews together' : 'Off by default. Checks Gmail labels, subjects, and previews.'}</small></span>
-      </label>
+      {hasMailboxes && <details className="workspace-email-options">
+        <summary>Email summary options</summary>
+        <label className="workspace-ai-review">
+          <input type="checkbox" checked={reviewUnclear} disabled={runningTriage}
+            onChange={event => onReviewUnclearChange(event.target.checked)} />
+          <span>Use AI for new unclear emails <small>When enabled, Copilot reviews new email previews in batches.</small></span>
+        </label>
+      </details>}
       {runningTriage && (
         <div className="workspace-progress" role="status">
           <strong>{triageStatus || 'Scanning conversations…'}</strong>
@@ -46,16 +48,18 @@ export default function EmailTriageCard({
           {triageAccountInfo && <span>{triageAccountInfo.email || 'Primary mailbox'} · {triageAccountInfo.index + 1}/{triageAccountInfo.total}</span>}
         </div>
       )}
-      {!runningTriage && triageLastError && <p className="workspace-error" role="alert">{triageLastError.error}</p>}
-      {!runningTriage && triageLastComplete?.scanned > 0 && <p className="workspace-search-hint" role="status">
-        {triageLastComplete.scanned} checked · {triageLastComplete.processed_count} updated · {triageLastComplete.skipped} unchanged
+      {!runningTriage && triageLastError && <p className="workspace-error" role="status">Email updates paused. We’ll try again automatically.</p>}
+      {!runningTriage && triageLastComplete?.completedAt && <p className="workspace-search-hint" role="status">
+        {triageLastComplete.processed_count > 0
+          ? `${triageLastComplete.processed_count} conversation${triageLastComplete.processed_count === 1 ? '' : 's'} updated`
+          : 'No new changes'}
         {triageLastComplete.aiCalls > 0 && ` · ${triageLastComplete.aiCalls} AI batch(es), ${triageLastComplete.aiReviewed} refined`}
-        {hasContinuation && ' · more emails to check'}
+        {triageLastComplete.hasMore && ' · continuing automatically'}
         {triageLastComplete.aiUnavailable && ' · AI was unavailable, basic checks still completed'}
       </p>}
       {loadingTriageResults && !runningTriage && <p className="workspace-empty" role="status">Loading priorities…</p>}
       {triageResults?.success === false && <p className="workspace-error" role="alert">{triageResults.error}</p>}
-      {triageResults?.success && !results.length && <p className="workspace-empty">No checked emails in this date range.</p>}
+      {triageResults?.success && !results.length && <p className="workspace-empty">{runningTriage ? 'Checking your mailbox. Summaries will appear here.' : 'Nothing to review in this date range.'}</p>}
       <ul className="priority-list">
         {results.map((result, index) => {
           const score = Math.round((result.priority || 0) * 100);
@@ -75,7 +79,6 @@ export default function EmailTriageCard({
         })}
       </ul>
       {triageResults?.data?.total_count > results.length && <button type="button" className="workspace-load-more" onClick={onLoadMore} disabled={busy}>Load more priorities</button>}
-      <button type="button" className="workspace-load-more" onClick={onLoadTriageResults} disabled={busy}>Refresh results</button>
     </section>
   );
 }
