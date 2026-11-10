@@ -1,42 +1,59 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import WorkspaceIcon from '../components/workspace/WorkspaceIcon';
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import { Link, useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import FollowUpEditor from '../components/followups/FollowUpEditor';
 import { api } from '../services/api';
-import ThreadChatPanel from '../components/thread/ThreadChatPanel';
+import { useEmailCache } from '../contexts/EmailCacheContext';
+import { findRelatedThreads } from '../utils/relatedThreads';
 import './ThreadDetail.css';
 
-function ThreadDetail() {
+const ThreadChatPanel = lazy(() => import('../components/thread/ThreadChatPanel'));
+
+function ThreadDetail({ primaryEmail, userId }) {
   const { threadId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnPath = location.state?.backTo;
+  const returnPage = ["/dashboard", "/threads", "/triage", "/follow-ups"].find(path => returnPath?.split("?")[0] === path);
+  const back = () => { if (returnPage) navigate(-1); else navigate("/dashboard"); };
+  const backLabel = { "/threads": "Inbox", "/triage": "Needs attention", "/follow-ups": "Follow-ups" }[returnPage] || "Home";
   const [searchParams] = useSearchParams();
-  const email = searchParams.get('email'); // 从 URL 参数获取邮箱
+  const email = searchParams.get('email');
+  const { getCachedThreads } = useEmailCache();
 
   const [thread, setThread] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [showChat, setShowChat] = useState(false);
-
+  const [showChat, setShowChat] = useState(null);
+  const closeChat = useCallback(() => setShowChat(false), []);
+  const [remoteRelated, setRemoteRelated] = useState(null);
+  const [relatedLoading, setRelatedLoading] = useState(false);
+  const [relatedError, setRelatedError] = useState('');
+  const relatedRequest = useRef(null);
   useEffect(() => {
-    loadThreadDetail();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setRemoteRelated(null);
+    setRelatedLoading(false);
+    setRelatedError('');
+    return () => relatedRequest.current?.abort();
   }, [threadId, email]);
 
-  const loadThreadDetail = async () => {
+  useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
-    try {
-      const params = email ? { email } : {};
-      const response = await api.get(`/gmail/threads/${threadId}`, { params });
-      setThread(response.data);
-      // Update email from thread response if available (thread's actual email account)
-      if (response.data.email_account && response.data.email_account !== email) {
-        // Thread belongs to a different email account, but we'll use the one from response
-      }
-    } catch (err) {
-      setError(err.response?.data?.detail || err.message || 'Failed to load thread');
-    } finally {
-      setLoading(false);
-    }
-  };
+    setShowChat(null);
+    api.get(`/gmail/threads/${threadId}`, { params: email ? { email } : {}, signal: controller.signal })
+      .then(response => {
+        if (!controller.signal.aborted) setThread(response.data);
+      })
+      .catch(err => {
+        if (!controller.signal.aborted) setError(err.response?.data?.detail || err.message || 'Failed to load thread');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [threadId, email]);
 
   const formatDate = (dateString) => {
     try {
@@ -74,8 +91,8 @@ function ThreadDetail() {
         <div className="error-message">
           <h2>Error loading thread</h2>
           <p>{error}</p>
-          <button className="btn-primary" onClick={() => navigate('/dashboard')}>
-            Back to Dashboard
+          <button className="btn-primary" onClick={back}>
+            Back to {backLabel}
           </button>
         </div>
       </div>
@@ -87,8 +104,8 @@ function ThreadDetail() {
       <div className="thread-detail-container">
         <div className="error-message">
           <h2>Thread not found</h2>
-          <button className="btn-primary" onClick={() => navigate('/dashboard')}>
-            Back to Dashboard
+          <button className="btn-primary" onClick={back}>
+            Back to {backLabel}
           </button>
         </div>
       </div>
@@ -97,12 +114,40 @@ function ThreadDetail() {
 
   const firstMessage = thread.messages[0];
   const subject = firstMessage.subject || '(No Subject)';
+  const account = thread.email_account || email || primaryEmail;
+  const cachedMailbox = getCachedThreads(account) || (account === primaryEmail ? getCachedThreads(null) : null);
+  const cached = cachedMailbox?.data?.threads || [];
+  const related = findRelatedThreads(cached, { thread_id: threadId, subject: firstMessage.subject, from: firstMessage.from });
+  const seenRelated = new Set(related.map(item => item.thread.thread_id));
+  const allRelated = [...related, ...(remoteRelated || [])
+    .filter(item => item.thread_id !== threadId && !seenRelated.has(item.thread_id))
+    .map(item => ({ thread: item, reason: 'Gmail subject or sender match' }))];
+  const relatedSearch = account ? `?${new URLSearchParams({ email: account })}` : '';
+
+  const loadMoreRelated = async () => {
+    relatedRequest.current?.abort();
+    const controller = new AbortController();
+    relatedRequest.current = controller;
+    setRelatedLoading(true);
+    setRelatedError('');
+    try {
+      const { data } = await api.get('/gmail/related', {
+        params: { thread_id: threadId, subject: firstMessage.subject, sender: firstMessage.from, email: account },
+        signal: controller.signal,
+      });
+      if (!controller.signal.aborted) setRemoteRelated(data.threads || []);
+    } catch {
+      if (!controller.signal.aborted) setRelatedError('Could not search Gmail. Try again.');
+    } finally {
+      if (!controller.signal.aborted) setRelatedLoading(false);
+    }
+  };
 
   return (
     <div className="thread-detail-container">
       <div className="thread-header">
-        <button className="btn-back" onClick={() => navigate('/dashboard')}>
-          ← Back to Dashboard
+        <button className="btn-back" onClick={back}>
+          <WorkspaceIcon name="back" /> Back to {backLabel}
         </button>
         <h1>{subject}</h1>
         <div className="thread-info">
@@ -116,18 +161,40 @@ function ThreadDetail() {
             className="btn-gmail"
             title="View in Gmail"
           >
-            Go to Gmail
+            <WorkspaceIcon name="arrow" /> Go to Gmail
           </a>
           <button
             className="btn-chat"
             onClick={() => setShowChat(!showChat)}
             title={showChat ? 'Close Chat' : 'Open Chat'}
           >
-            {showChat ? '✕' : '💬'} Chat
+            <WorkspaceIcon name="spark" /> {showChat ? 'Close assistant' : 'Ask about this thread'}
           </button>
         </div>
       </div>
 
+      {account && <FollowUpEditor key={account + ":" + threadId} threadId={threadId} email={account} />}
+
+      <section className="workspace-related" aria-labelledby="related-title">
+        <div className="workspace-related-head">
+          <div>
+            <p className="workspace-eyebrow"><WorkspaceIcon name="link" /> THREAD CONTEXT</p>
+            <h2 id="related-title">Related conversations</h2>
+          </div>
+          <button type="button" className="btn-secondary" onClick={loadMoreRelated} disabled={relatedLoading}>
+            <WorkspaceIcon name="search" /> {relatedLoading ? 'Searching…' : 'Search related in Gmail'}
+          </button>
+        </div>
+        {relatedError && <p className="workspace-error" role="alert">{relatedError}</p>}
+        {allRelated.length === 0 && <p className="workspace-empty">
+          {remoteRelated ? 'No related conversations found in the last 30 days.' : 'Search Gmail by this conversation’s subject and sender.'}
+        </p>}
+        <ul>{allRelated.map(({ thread: item, reason }) => (
+          <li key={item.thread_id}>
+            <Link to={`/thread/${encodeURIComponent(item.thread_id)}${relatedSearch}`}><WorkspaceIcon name="link" /><strong>{item.subject}</strong><small>{reason}</small></Link>
+          </li>
+        ))}</ul>
+      </section>
       <div className="thread-content">
         {thread.messages.map((message, index) => {
           const emailAddress = formatEmailAddress(message.from);
@@ -194,14 +261,14 @@ function ThreadDetail() {
         })}
       </div>
 
-      <div className={`thread-chat-wrapper ${showChat ? 'open' : ''}`}>
-        <ThreadChatPanel
-          threadId={threadId}
-          email={thread?.email_account || email}
-          onClose={() => setShowChat(false)}
-        />
-        <div className="thread-chat-overlay" onClick={() => setShowChat(false)} />
-      </div>
+      {showChat !== null && (
+        <div className={`thread-chat-wrapper ${showChat ? 'open' : ''}`} hidden={!showChat}>
+          <Suspense fallback={<p className="workspace-panel-loading" role="status">Loading assistant…</p>}>
+            <ThreadChatPanel threadId={threadId} email={account} userId={userId} isOpen={showChat} onClose={closeChat} />
+          </Suspense>
+          <div className="thread-chat-overlay" onClick={closeChat} />
+        </div>
+      )}
     </div>
   );
 }

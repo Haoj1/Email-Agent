@@ -1,21 +1,24 @@
 """
 Triage API routes - Email classification and prioritization
 """
-from fastapi import APIRouter, HTTPException, Depends, Request, Body, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, Request, Body, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List, AsyncGenerator
-from pydantic import BaseModel
-from datetime import datetime, timedelta
+from pydantic import BaseModel, Field
+from googleapiclient.errors import HttpError
+from datetime import datetime, timedelta, timezone
 import json
 import asyncio
-import threading
+from jose import JWTError, jwt
+from app.config import settings
 from app.database import get_db
 from app.routes.auth import get_user_credentials, get_current_user_id
 from app.services.gmail_service import GmailService
-from app.services.background_tasks import sync_and_embed_emails
-from app.agents.triage_agent import TriageAgent
-from app.models import TriageResult, User
+from app.services.follow_ups import reopen_follow_ups
+from app.services.triage_rules import classify_metadata
+from app.services.triage_store import write_triage_results
+from app.models import TriageResult, User, UserEmail
 from sqlalchemy import select
 
 router = APIRouter()
@@ -26,6 +29,10 @@ class TriageRequest(BaseModel):
     max_results: Optional[int] = 5  # Small batch for testing
     days: Optional[int] = 7
     email: Optional[str] = None
+    cursor: Optional[str] = Field(default=None, max_length=4096)
+    review_unclear: bool = False
+    automatic: bool = False
+    checkpoint: Optional[str] = Field(default=None, max_length=4096)
 
 
 class TriageResponse(BaseModel):
@@ -36,235 +43,128 @@ class TriageResponse(BaseModel):
     message: str
 
 
+def _triage_event(kind, **fields):
+    return f"data: {json.dumps({'type': kind, **fields})}\n\n"
+
+
+def _triage_token(value, user_id, email, kind):
+    data = jwt.decode(value, settings.SESSION_SECRET, algorithms=["HS256"], options={"require_exp": True})
+    if data.get("kind") != kind or data.get("user_id") != user_id or data.get("email") != email:
+        raise JWTError("Invalid mailbox cursor")
+    return data
+
+
 async def stream_triage_progress(
-    triage_request: TriageRequest,
-    request: Request,
-    db: AsyncSession
+    triage_request: TriageRequest, request: Request, db: AsyncSession, user_id: int
 ) -> AsyncGenerator[str, None]:
-    """Stream triage progress with SSE"""
+    """Process and commit a bounded Gmail page before advertising its continuation."""
+    page_token = None
     try:
-        # Get user ID
-        user_id = await get_current_user_id(request, db)
-        
-        # Get user
-        result = await db.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
-        if not user:
-            yield f"data: {json.dumps({'type': 'error', 'error': 'User not found'})}\n\n"
-            return
-        
-        # Get credentials
         credentials = await get_user_credentials(request, triage_request.email, db)
-        
-        # Determine which email is being triaged to store with results
-        active_email = triage_request.email
-        if not active_email:
-            from app.models import UserEmail
-            primary_res = await db.execute(
-                select(UserEmail).where(
-                    UserEmail.user_id == user_id, 
-                    UserEmail.is_primary == True
-                )
-            )
-            primary_email_obj = primary_res.scalar_one_or_none()
-            active_email = primary_email_obj.email if primary_email_obj else None
-            
-        gmail_service = GmailService(credentials)
-        
-        # Get normalized threads
-        max_results = triage_request.max_results or 100
-        days = triage_request.days or 7
-        
-        yield f"data: {json.dumps({'type': 'status', 'message': f'Fetching threads (max {max_results}, last {days} days)...'})}\n\n"
-        await asyncio.sleep(0.1)
-        
-        raw_threads = gmail_service.get_threads(max_results=max_results, days=days)
-        
-        if not raw_threads:
-            yield f"data: {json.dumps({'type': 'complete', 'success': True, 'processed_count': 0, 'results': [], 'message': 'No threads found to triage'})}\n\n"
-            return
-        
-        # Normalize threads
-        yield f"data: {json.dumps({'type': 'status', 'message': 'Normalizing threads...'})}\n\n"
-        await asyncio.sleep(0.1)
-        
-        normalized_threads = []
-        for raw_thread in raw_threads:
-            normalized = gmail_service.normalize_thread(raw_thread)
-            if normalized:
-                normalized_threads.append(normalized)
-        
-        if not normalized_threads:
-            yield f"data: {json.dumps({'type': 'complete', 'success': True, 'processed_count': 0, 'results': [], 'message': 'No valid threads to triage'})}\n\n"
-            return
-        
-        # Smart filtering
-        thread_ids = [t.get('thread_id') for t in normalized_threads if t.get('thread_id')]
-        
-        yield f"data: {json.dumps({'type': 'status', 'message': 'Checking existing triage results...'})}\n\n"
-        await asyncio.sleep(0.1)
-        
-        # Batch query existing triage results
-        if thread_ids:
-            existing_triage_query = await db.execute(
-                select(TriageResult)
-                .where(
-                    TriageResult.user_id == user_id,
-                    TriageResult.thread_id.in_(thread_ids)
-                )
-            )
-            existing_triage_results = existing_triage_query.scalars().all()
-            existing_triage_map = {r.thread_id: r.message_count for r in existing_triage_results}
-        else:
-            existing_triage_map = {}
-        
-        # Filter threads that need triage
-        threads_to_triage = []
-        skipped_count = 0
-        
-        for thread in normalized_threads:
-            thread_id = thread.get('thread_id')
-            if not thread_id:
-                continue
-            
-            current_message_count = thread.get('message_count', 0)
-            existing_message_count = existing_triage_map.get(thread_id)
-            
-            if existing_message_count is None:
-                threads_to_triage.append(thread)
-            elif current_message_count > existing_message_count:
-                threads_to_triage.append(thread)
-            else:
-                skipped_count += 1
-        
-        total_to_triage = len(threads_to_triage)
-        
-        if not threads_to_triage:
-            yield f"data: {json.dumps({'type': 'complete', 'success': True, 'processed_count': 0, 'results': [], 'message': f'No new threads to triage. {skipped_count} threads already triaged with no new messages.'})}\n\n"
-            return
-        
-        yield f"data: {json.dumps({'type': 'status', 'message': f'Found {total_to_triage} threads to triage ({skipped_count} skipped)'})}\n\n"
-        await asyncio.sleep(0.1)
-        
-        # Progress tracking
-        progress_steps = []
-        lock = threading.Lock()
-        
-        def progress_callback(current: int, total: int, result: dict):
-            with lock:
-                progress_steps.append({
-                    'current': current,
-                    'total': total,
-                    'progress': int((current / total) * 100) if total > 0 else 0
-                })
-        
-        # Run triage in a separate thread to avoid blocking
-        triage_results = []
-        error_occurred = [False]
-        error_message = [None]
-        
-        def run_triage():
+        email = triage_request.email or await db.scalar(
+            select(UserEmail.email).where(UserEmail.user_id == user_id, UserEmail.is_primary.is_(True))
+        )
+        days = max(1, min(triage_request.days or 7, 30))
+        page_size = max(1, min(triage_request.max_results or 25, 25))
+        now = datetime.now(timezone.utc)
+        through = int(now.timestamp())
+        start = int((now - timedelta(days=days)).timestamp())
+        if triage_request.checkpoint:
             try:
-                triage_agent = TriageAgent()
-                # Use concurrent processing with 4 workers
-                results = triage_agent.triage_batch(
-                    threads_to_triage, 
-                    progress_callback=progress_callback,
-                    max_workers=4
-                )
-                triage_results.extend(results)
-            except Exception as e:
-                error_occurred[0] = True
-                error_message[0] = str(e)
-        
-        # Start triage in background thread
-        triage_thread = threading.Thread(target=run_triage)
-        triage_thread.start()
-        
-        # Stream progress updates
-        last_progress = -1
-        while triage_thread.is_alive():
-            await asyncio.sleep(0.3)  # Check every 300ms
-            
-            with lock:
-                if progress_steps:
-                    latest = progress_steps[-1]
-                    if latest['progress'] != last_progress:
-                        yield f"data: {json.dumps({'type': 'progress', 'current': latest['current'], 'total': latest['total'], 'progress': latest['progress']})}\n\n"
-                        last_progress = latest['progress']
-        
-        # Wait for thread to complete
-        triage_thread.join()
-        
-        if error_occurred[0]:
-            yield f"data: {json.dumps({'type': 'error', 'error': error_message[0]})}\n\n"
-            return
-        
-        # Save to database
-        yield f"data: {json.dumps({'type': 'status', 'message': 'Saving results to database...'})}\n\n"
-        await asyncio.sleep(0.1)
-        
-        saved_results = []
-        for result in triage_results:
-            thread_id = result.get("thread_id")
-            if not thread_id:
-                continue
-            
-            # Find the corresponding thread to get message_count
-            thread_message_count = None
-            for thread in threads_to_triage:
-                if thread.get('thread_id') == thread_id:
-                    thread_message_count = thread.get('message_count', 0)
-                    break
-            
-            # Check if result already exists
-            existing = await db.execute(
-                select(TriageResult).where(
-                    TriageResult.user_id == user_id,
-                    TriageResult.thread_id == thread_id
-                )
+                checkpoint = _triage_token(triage_request.checkpoint, user_id, email, "triage-checkpoint")
+                # A short overlap catches late-arriving search results. Unchanged rows are skipped.
+                start = max(start, min(int(checkpoint["through"]), through) - 600)
+            except (JWTError, KeyError, TypeError, ValueError):
+                pass
+        query = f"after:{start} before:{through}"
+        if triage_request.cursor:
+            try:
+                saved = _triage_token(triage_request.cursor, user_id, email, "triage")
+                query, page_token, page_size = saved["query"], saved["page_token"], saved["page_size"]
+                through = int(query.rsplit("before:", 1)[1])
+            except (JWTError, KeyError, TypeError, ValueError, IndexError):
+                yield _triage_event("error", code="cursor_expired", error="This scan expired. A fresh scan can continue.")
+                return
+
+        yield _triage_event("status", message="Checking recent email subjects and previews…")
+        service = GmailService(credentials)
+        raw, next_token = await asyncio.to_thread(
+            service.get_thread_page, page_size, days, query=query, page_token=page_token, strict=True
+        )
+        reopened = await reopen_follow_ups(db, user_id, email, raw)
+        threads = [thread for item in raw if (thread := service.normalize_thread(item, message_limit=3))]
+        counts = {thread["thread_id"]: thread["message_count"] for thread in threads}
+        existing = {row.thread_id: row for row in (await db.execute(
+            select(TriageResult.thread_id, TriageResult.message_count, TriageResult.label, TriageResult.ai_reviewed).where(
+                TriageResult.user_id == user_id, TriageResult.thread_id.in_(counts)
             )
-            existing_result = existing.scalar_one_or_none()
-            
-            if existing_result:
-                existing_result.label = result["label"]
-                existing_result.priority = result["priority"]
-                existing_result.summary = result["summary"]
-                existing_result.key_points = result.get("key_points", [])
-                existing_result.message_count = thread_message_count
-                existing_result.email = active_email  # Update email in case it changed or was missing
-                existing_result.updated_at = datetime.utcnow()
-                db_result = existing_result
-            else:
-                db_result = TriageResult(
-                    user_id=user_id,
-                    thread_id=thread_id,
-                    email=active_email,
-                    label=result["label"],
-                    priority=result["priority"],
-                    summary=result["summary"],
-                    key_points=result.get("key_points", []),
-                    message_count=thread_message_count
-                )
-                db.add(db_result)
-            
-            saved_results.append({
-                "thread_id": thread_id,
-                "label": result["label"],
-                "priority": result["priority"],
-                "summary": result["summary"],
-                "key_points": result.get("key_points", [])
-            })
-        
+        )).all()} if counts else {}
         await db.commit()
-        
-        # Send final result
-        yield f"data: {json.dumps({'type': 'complete', 'success': True, 'processed_count': len(saved_results), 'results': saved_results, 'message': f'Successfully triaged {len(saved_results)} threads'})}\n\n"
-        
-    except Exception as e:
-        error_str = str(e)
-        print(f"Error in stream_triage_progress: {e}")
-        yield f"data: {json.dumps({'type': 'error', 'error': error_str})}\n\n"
+
+        results = []
+        uncertain = []
+        for thread in threads:
+            thread_id = thread["thread_id"]
+            previous = existing.get(thread_id)
+            changed = previous is None or previous.message_count is None or counts[thread_id] > previous.message_count
+            if changed:
+                result = classify_metadata(thread)
+                results.append(result)
+                if result["label"] == "REVIEW":
+                    uncertain.append(thread)
+            elif previous.label == "REVIEW" and triage_request.review_unclear and not previous.ai_reviewed:
+                uncertain.append(thread)
+
+        skipped = len(threads) - len(results)
+        ai_calls = 0
+        reviewed = {}
+        ai_reviewed = 0
+        ai_unavailable = False
+        if triage_request.review_unclear and uncertain:
+            yield _triage_event("status", message=f"AI reviewing {len(uncertain)} unclear conversations in one batch…")
+            ai_calls = 1
+            try:
+                from app.agents.batch_triage import review_batch
+
+                reviewed = await asyncio.to_thread(review_batch, uncertain)
+                ai_reviewed = len(reviewed)
+                results = [row for row in results if row["thread_id"] not in reviewed] + list(reviewed.values())
+            except Exception as exc:
+                print(f"Triage batch review unavailable: {type(exc).__name__}")
+                ai_unavailable = True
+
+        yield _triage_event("progress", current=len(threads), total=len(threads), progress=100)
+
+        saved_rows = [{
+            "user_id": user_id, "thread_id": row["thread_id"], "email": email,
+            "label": row["label"], "priority": row["priority"], "summary": row["summary"],
+            "key_points": row.get("key_points", []), "message_count": counts[row["thread_id"]],
+            "ai_reviewed": row["thread_id"] in reviewed,
+        } for row in results if row.get("thread_id") in counts and not row.get("classification_failed")]
+
+        await write_triage_results(db, saved_rows)
+        await db.commit()
+        cursor = jwt.encode({
+            "kind": "triage", "user_id": user_id, "email": email, "query": query,
+            "page_token": next_token, "page_size": page_size, "exp": now + timedelta(hours=8),
+        }, settings.SESSION_SECRET, algorithm="HS256") if next_token else None
+        checkpoint = jwt.encode({
+            "kind": "triage-checkpoint", "user_id": user_id, "email": email, "through": through,
+            "exp": now + timedelta(days=7),
+        }, settings.SESSION_SECRET, algorithm="HS256") if not next_token else None
+        yield _triage_event("complete", success=True, scanned_count=len(threads), skipped_count=skipped,
+                            processed_count=len(saved_rows), next_cursor=cursor, checkpoint=checkpoint,
+                            follow_ups_reopened=reopened,
+                            ai_calls=ai_calls, ai_reviewed=ai_reviewed, ai_unavailable=ai_unavailable,
+                            results=[{key: value for key, value in row.items() if key != "user_id"} for row in saved_rows])
+    except HttpError as exc:
+        if page_token and exc.resp.status in (400, 404):
+            yield _triage_event("error", code="cursor_expired", error="This scan expired. A fresh scan can continue.")
+        else:
+            yield _triage_event("error", error="Gmail could not be checked. Try again shortly.")
+    except Exception as exc:
+        print(f"Triage page failed: {type(exc).__name__}")
+        yield _triage_event("error", error="Could not scan this page. Try again to continue.")
 
 
 @router.post("/triage/run")
@@ -288,8 +188,9 @@ async def run_triage(
     - type: 'complete' - Final result
     - type: 'error' - Error occurred
     """
+    user_id = await get_current_user_id(request, db)
     return StreamingResponse(
-        stream_triage_progress(triage_request, request, db),
+        stream_triage_progress(triage_request, request, db, user_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -349,7 +250,7 @@ async def run_triage_sync(
         days = triage_request.days or 7
         
         print(f"Fetching threads: max_results={max_results}, days={days}")
-        raw_threads = gmail_service.get_threads(max_results=max_results, days=days)
+        raw_threads = await asyncio.to_thread(gmail_service.get_threads, max_results=max_results, days=days)
         
         if not raw_threads:
             return TriageResponse(
@@ -425,6 +326,8 @@ async def run_triage_sync(
         
         # Run Triage Agent only on threads that need triage
         print(f"Running triage on {len(threads_to_triage)} threads (skipped {skipped_count} with no new messages)...")
+        from app.agents.triage_agent import TriageAgent
+
         triage_agent = TriageAgent()
         # Use concurrent processing with 4 workers
         triage_results = triage_agent.triage_batch(threads_to_triage, max_workers=4)
@@ -433,7 +336,7 @@ async def run_triage_sync(
         saved_results = []
         for result in triage_results:
             thread_id = result.get("thread_id")
-            if not thread_id:
+            if not thread_id or result.get("classification_failed"):
                 continue
             
             # Find the corresponding thread to get message_count
@@ -506,7 +409,6 @@ async def run_triage_sync(
 @router.get("/triage/stats")
 async def get_triage_stats(
     request: Request,
-    background_tasks: BackgroundTasks,
     email: Optional[str] = None,
     days: int = Query(7, ge=1, le=30),
     db: AsyncSession = Depends(get_db)
@@ -517,52 +419,16 @@ async def get_triage_stats(
     try:
         user_id = await get_current_user_id(request, db)
         
-        # Trigger background sync and embedding whenever stats are checked
-        # Use force=False to respect the 1-hour cooldown period
-        background_tasks.add_task(sync_and_embed_emails, user_id, email, days, False)
-
         async def _pending_for_email(target_email: str) -> int:
-            """Compute pending triage count for a single email account."""
-            # 1. Get credentials and Gmail service
             credentials = await get_user_credentials(request, target_email, db)
             gmail_service = GmailService(credentials)
-            
-            # 2. Get recent threads from Gmail
-            raw_threads = gmail_service.get_threads(max_results=50, days=days)
-            if not raw_threads:
+            ids = await asyncio.to_thread(gmail_service.get_recent_thread_ids, 50, days)
+            if not ids:
                 return 0
-                
-            # 3. Normalize and get thread IDs
-            thread_ids = []
-            thread_message_counts = {}
-            for raw in raw_threads:
-                normalized = gmail_service.normalize_thread(raw)
-                if normalized and normalized.get('thread_id'):
-                    tid = normalized['thread_id']
-                    thread_ids.append(tid)
-                    thread_message_counts[tid] = normalized.get('message_count', 0)
-            
-            if not thread_ids:
-                return 0
-                
-            # 4. Check database for existing triage results
-            query = select(TriageResult).where(
-                TriageResult.user_id == user_id,
-                TriageResult.thread_id.in_(thread_ids)
-            )
-            result = await db.execute(query)
-            existing_results = result.scalars().all()
-            existing_map = {r.thread_id: r.message_count for r in existing_results}
-            
-            # 5. Count how many need triage (new or updated)
-            pending = 0
-            for tid in thread_ids:
-                existing_count = existing_map.get(tid)
-                current_count = thread_message_counts.get(tid, 0)
-                
-                if existing_count is None or current_count > existing_count:
-                    pending += 1
-            return pending
+            known = set(await db.scalars(select(TriageResult.thread_id).where(
+                TriageResult.user_id == user_id, TriageResult.thread_id.in_(ids)
+            )))
+            return len(set(ids) - known)
 
         # If email is provided, compute stats for that account only (backward compatible)
         if email:

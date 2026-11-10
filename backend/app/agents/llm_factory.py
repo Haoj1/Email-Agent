@@ -5,6 +5,7 @@ Supports DeepSeek and OpenAI providers
 from langchain_openai import ChatOpenAI
 from langchain_core.language_models import BaseChatModel
 from app.config import settings
+from app.services.telemetry import ModelUsageLogger
 
 
 def get_llm(
@@ -55,6 +56,7 @@ def get_llm(
             openai_api_base=base_url,
             temperature=temperature,
             max_tokens=max_tokens,
+            callbacks=[ModelUsageLogger(provider, model_name)],
         )
     
     elif provider == "openai":
@@ -73,6 +75,7 @@ def get_llm(
             openai_api_key=api_key,
             temperature=temperature,
             max_tokens=max_tokens,
+            callbacks=[ModelUsageLogger(provider, model_name)],
         )
     
     else:
@@ -98,7 +101,7 @@ def get_triage_llm() -> BaseChatModel:
     )
 
 
-def get_chat_llm() -> BaseChatModel:
+def get_chat_llm(*, max_tokens: int = 4096) -> BaseChatModel:
     """
     Get optimized LLM for Chat Agents (Thread Chat, Assist Chat)
     
@@ -108,6 +111,6 @@ def get_chat_llm() -> BaseChatModel:
     """
     return get_llm(
         temperature=0.7,  # More creative for chat
-        max_tokens=4096,  # Longer responses
+        max_tokens=max_tokens,
         provider="deepseek"
     )

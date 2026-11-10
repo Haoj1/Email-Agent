@@ -1,0 +1,61 @@
+name: Deploy Email Agent to cs320
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: email-agent-cs320
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/check.yml
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend
+        env:
+          CI: 'true'
+          REACT_APP_API_URL: https://api.mail-agents.net/api
+      - name: Package frontend and backend
+        run: bash scripts/pack-release.sh "$RUNNER_TEMP/email-agent.tar.gz"
+      - name: Activate release
+        env:
+          DEPLOY_HOST: ${{ vars.CS320_EMAIL_HOST }}
+          DEPLOY_HOST_KEY: ${{ vars.CS320_EMAIL_HOST_KEY }}
+          DEPLOY_KEY: ${{ secrets.CS320_EMAIL_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key="$RUNNER_TEMP/email-agent-deploy.key"
+          known_hosts="$RUNNER_TEMP/email-agent-known-hosts"
+          trap 'rm -f "$key" "$known_hosts"' EXIT
+          printf '%s\n' "$DEPLOY_KEY" > "$key"
+          printf '%s\n' "$DEPLOY_HOST_KEY" > "$known_hosts"
+          ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o ConnectTimeout=15 \
+            "email_agent@$DEPLOY_HOST" "release $GITHUB_SHA $GITHUB_RUN_ID $GITHUB_RUN_ATTEMPT" \
+            < "$RUNNER_TEMP/email-agent.tar.gz"
+      - name: Check public frontend and backend
+        run: |
+          curl --fail --silent --show-error --max-time 15 https://app.mail-agents.net/ -o /dev/null
+          curl --fail --silent --show-error --max-time 15 https://api.mail-agents.net/api/ready

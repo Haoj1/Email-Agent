@@ -1,168 +1,135 @@
-"""
-Background Task for Email Sync and Embedding
-"""
+"""Index a small, durable backlog of changed Gmail conversations per mailbox."""
 import asyncio
-from typing import Optional, Dict
-from datetime import datetime, timedelta
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from app.database import get_db
-from app.models import UserEmail, EmailEmbedding
-from app.services.gmail_service import GmailService
+import hashlib
+import logging
+
+from googleapiclient.errors import HttpError
+from sqlalchemy import delete, func, select, text, update
+from sqlalchemy.dialects.postgresql import insert
+
+from app.models import EmailEmbedding, MailboxThreadIndex
 from app.services.embedding_service import EmbeddingService
-from google.oauth2.credentials import Credentials
-import os
+from app.services.gmail_service import GmailService
 
-# Track running tasks to avoid duplicate processing
-_running_tasks: Dict[str, datetime] = {}
+logger = logging.getLogger("uvicorn.error")
+EXCLUDED_LABELS = {"DRAFT", "TRASH", "SPAM"}
 
-async def sync_and_embed_emails(user_id: int, email: Optional[str] = None, days: int = 7, force: bool = False):
-    """
-    Background task to sync recent emails and generate embeddings
-    
-    Args:
-        user_id: User ID
-        email: Optional email address (defaults to primary)
-        days: Number of days to look back (default: 7)
-        force: Force processing even if recently processed (default: False)
-    """
-    # Create task key to track duplicates
-    task_key = f"{user_id}_{email or 'primary'}"
-    
-    # Check if task is already running or was recently completed (within last hour)
-    if not force and task_key in _running_tasks:
-        last_run = _running_tasks[task_key]
-        if datetime.now() - last_run < timedelta(hours=1):
-            print(f"Skipping embedding task for {task_key} - recently completed")
-            return
-    
-    # Mark task as running
-    _running_tasks[task_key] = datetime.now()
-    
-    print(f"Starting background sync and embed for user {user_id}, email {email}...")
-    
-    # Get a new database session
-    from app.database import AsyncSessionLocal
-    async with AsyncSessionLocal() as db:
-        try:
-            # 1. Get credentials
-            query = select(UserEmail).where(UserEmail.user_id == user_id)
-            if email:
-                query = query.where(UserEmail.email == email)
-            else:
-                query = query.where(UserEmail.is_primary == True)
-                
-            result = await db.execute(query)
-            user_email = result.scalar_one_or_none()
-            
-            if not user_email:
-                print(f"No email found for user {user_id}")
-                return
 
-            # Get OAuth token
-            from app.models import OAuthToken
-            token_query = select(OAuthToken).where(OAuthToken.user_email_id == user_email.id)
-            token_result = await db.execute(token_query)
-            token = token_result.scalar_one_or_none()
-            
-            if not token:
-                print(f"No OAuth token found for email {user_email.email}")
-                return
+def _index_chunks(messages, service):
+    """Return at most four distinct excerpts from the three newest messages."""
+    seen = set()
+    excerpts = []
+    for message in reversed(messages[-3:]):
+        body = "\n".join(line for line in (message.get("body_text") or "").splitlines()
+                         if not line.lstrip().startswith(">"))
+        if len(body.strip()) < 10:
+            continue
+        chunks = service.chunk_text(body, chunk_size=800, overlap=60, max_chunks=2)
+        for chunk in chunks:
+            key = " ".join(chunk.split()).casefold()
+            if key and key not in seen:
+                seen.add(key)
+                excerpts.append((message["message_id"], chunk))
+                if len(excerpts) == 4:
+                    return excerpts
+    return excerpts
 
-            creds = Credentials(
-                token=token.access_token,
-                refresh_token=token.refresh_token,
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=os.getenv("GOOGLE_CLIENT_ID"),
-                client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
-                scopes=token.scope.split(' ') if token.scope else []
-            )
 
-            # 2. Initialize services
-            gmail_service = GmailService(creds)
-            embedding_service = EmbeddingService()
-            
-            # 3. Fetch recent threads (reduced from 20 to 5 for faster processing)
-            max_threads = 5 if not force else 20  # Process fewer threads on auto-sync
-            raw_threads = gmail_service.get_threads(max_results=max_threads, days=days)
-            print(f"Fetched {len(raw_threads)} threads for embedding")
+def searchable_messages(thread):
+    return [
+        message for message in thread.get("messages", [])
+        if message.get("id") and not EXCLUDED_LABELS.intersection(message.get("labelIds", []))
+    ][-3:]
 
-            # Quick check: count how many threads need embedding
-            thread_ids = [t['id'] for t in raw_threads]
-            if thread_ids:
-                existing_count_query = select(func.count()).select_from(
-                    select(EmailEmbedding.thread_id)
-                    .where(
-                        EmailEmbedding.user_id == user_id,
-                        EmailEmbedding.thread_id.in_(thread_ids)
-                    )
-                    .distinct()
-                    .subquery()
-                )
-                existing_count_result = await db.execute(existing_count_query)
-                existing_count = existing_count_result.scalar() or 0
-                
-                if existing_count >= len(thread_ids) and not force:
-                    print(f"All {len(thread_ids)} threads already embedded, skipping")
-                    return
 
-            processed_count = 0
-            for raw_thread in raw_threads:
-                thread_id = raw_thread['id']
-                
-                # Check if we already have embeddings for this thread
-                check_query = select(EmailEmbedding).where(
-                    EmailEmbedding.user_id == user_id,
-                    EmailEmbedding.thread_id == thread_id
-                ).limit(1)
-                check_result = await db.execute(check_query)
-                if check_result.scalar_one_or_none():
-                    continue  # Skip already embedded threads
+def message_version(messages):
+    return hashlib.sha256("\0".join(message["id"] for message in messages).encode()).hexdigest()
 
-                # Get full thread content
-                full_thread = gmail_service.get_thread_full(thread_id)
-                normalized = gmail_service.normalize_thread(full_thread)
-                
-                if not normalized or not normalized.get('messages'):
-                    continue
 
-                # Process each message in the thread (limit to first 3 messages per thread for speed)
-                messages_to_process = normalized['messages'][:3]
-                for msg in messages_to_process:
-                    body = msg.get('body_text', '')
-                    if not body or len(body.strip()) < 10:
-                        continue
+async def drop_index(db, mailbox, thread_ids):
+    if thread_ids:
+        await db.execute(delete(MailboxThreadIndex).where(
+            MailboxThreadIndex.user_email_id == mailbox, MailboxThreadIndex.thread_id.in_(thread_ids)
+        ))
+        await db.execute(delete(EmailEmbedding).where(
+            EmailEmbedding.user_email_id == mailbox, EmailEmbedding.thread_id.in_(thread_ids)
+        ))
 
-                    # Chunk and embed (smaller chunks for faster processing)
-                    chunks = embedding_service.chunk_text(body, chunk_size=800, overlap=100)
-                    # Limit chunks per message to avoid too many embeddings
-                    chunks = chunks[:3]  # Max 3 chunks per message
-                    
-                    # Batch generate embeddings for better performance
-                    if chunks:
-                        vectors = embedding_service.get_embeddings(chunks)
-                        for chunk, vector in zip(chunks, vectors):
-                            new_embedding = EmailEmbedding(
-                                user_id=user_id,
-                                thread_id=thread_id,
-                                message_id=msg['message_id'],
-                                content=chunk,
-                                embedding=vector
-                            )
-                            db.add(new_embedding)
-                
-                # Commit per thread to show progress and avoid long transactions
-                await db.commit()
-                processed_count += 1
-                print(f"Embedded thread {thread_id} ({processed_count}/{len(raw_threads)})")
 
-            print(f"Background sync and embed completed for user {user_id} - processed {processed_count} threads")
+async def record_index_changes(db, mailbox, threads, removed):
+    rows = []
+    removed = set(removed)
+    for thread in threads:
+        messages = searchable_messages(thread)
+        if messages:
+            rows.append({"user_email_id": mailbox, "thread_id": thread["id"],
+                         "desired_version": message_version(messages)})
+        else:
+            removed.add(thread["id"])
+    await drop_index(db, mailbox, removed)
+    if rows:
+        insert_rows = insert(MailboxThreadIndex).values(rows)
+        await db.execute(insert_rows.on_conflict_do_update(
+            index_elements=[MailboxThreadIndex.user_email_id, MailboxThreadIndex.thread_id],
+            set_={"desired_version": insert_rows.excluded.desired_version, "updated_at": func.now()},
+            where=MailboxThreadIndex.desired_version != insert_rows.excluded.desired_version,
+        ))
 
-        except Exception as e:
-            print(f"Error in background sync and embed: {e}")
-            import traceback
-            traceback.print_exc()
+
+async def index_pending(db, mailbox, user_id):
+    from app.routes.auth import get_mailbox_credentials
+
+    try:
+        locked = await db.scalar(text("SELECT pg_try_advisory_xact_lock(415019, :mailbox)"), {"mailbox": mailbox})
+        if not locked:
             await db.rollback()
-        finally:
-            # Update last run time
-            _running_tasks[task_key] = datetime.now()
+            return
+        pending = (await db.execute(select(MailboxThreadIndex.thread_id, MailboxThreadIndex.desired_version)
+            .where(MailboxThreadIndex.user_email_id == mailbox,
+                   MailboxThreadIndex.indexed_version.is_distinct_from(MailboxThreadIndex.desired_version))
+            .order_by(MailboxThreadIndex.updated_at, MailboxThreadIndex.thread_id).limit(2))).all()
+        if not pending:
+            await db.rollback()
+            return
+
+        gmail = await asyncio.to_thread(GmailService, await get_mailbox_credentials(db, mailbox))
+        embeddings = EmbeddingService()
+        for thread_id, version in pending:
+            candidate = update(MailboxThreadIndex).where(
+                MailboxThreadIndex.user_email_id == mailbox, MailboxThreadIndex.thread_id == thread_id,
+                MailboxThreadIndex.desired_version == version,
+            )
+            try:
+                raw = await asyncio.to_thread(gmail.get_thread_full, thread_id)
+            except HttpError as exc:
+                if exc.resp.status == 404:
+                    await db.execute(candidate.values(updated_at=func.now()))
+                    continue
+                raise
+
+            messages = searchable_messages(raw)
+            if message_version(messages) != version:
+                # The next Gmail history page will publish this newer version.
+                await db.execute(candidate.values(updated_at=func.now()))
+                continue
+            normalized = gmail.normalize_thread({**raw, "messages": messages}, message_limit=3)
+            excerpts = _index_chunks(normalized["messages"], embeddings) if normalized else []
+            vectors = await asyncio.to_thread(embeddings.get_embeddings, [chunk for _, chunk in excerpts])
+            if len(vectors) != len(excerpts):
+                raise ValueError("Embedding service returned an incomplete batch")
+
+            updated = await db.execute(candidate.values(indexed_version=version, updated_at=func.now()))
+            if not updated.rowcount:
+                continue
+            await db.execute(delete(EmailEmbedding).where(
+                EmailEmbedding.user_email_id == mailbox, EmailEmbedding.thread_id == thread_id
+            ))
+            db.add_all([
+                EmailEmbedding(user_id=user_id, user_email_id=mailbox, thread_id=thread_id,
+                               message_id=message_id, content=chunk, embedding=vector)
+                for (message_id, chunk), vector in zip(excerpts, vectors)
+            ])
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        logger.warning("mailbox_index failure=%s", type(exc).__name__)

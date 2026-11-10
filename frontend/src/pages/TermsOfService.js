@@ -1,6 +1,5 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import logo from '../assets/logo.png';
 import './TermsOfService.css';
 
 function TermsOfService() {
@@ -9,7 +8,7 @@ function TermsOfService() {
       <div className="legal-container">
         <div className="legal-header">
           <Link to="/" className="logo-link">
-            <img src={logo} alt="Email Agent Logo" className="legal-logo" />
+            <img src={`${process.env.PUBLIC_URL}/signal-mark.svg`} alt="Email Agent Logo" className="legal-logo" />
             <h1>Email Agent</h1>
           </Link>
         </div>

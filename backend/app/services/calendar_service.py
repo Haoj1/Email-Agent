@@ -5,7 +5,7 @@ Handles Google Calendar API operations
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from typing import List, Dict, Optional, Any
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 class CalendarService:
     """Service for Calendar API operations"""
@@ -19,6 +19,7 @@ class CalendarService:
         time_max_iso: str,
         calendar_id: str = "primary",
         max_results: int = 2500,
+        *, limit: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
         List calendar events in a time range.
@@ -32,6 +33,8 @@ class CalendarService:
         Returns:
             List of Google Calendar event resources.
         """
+        if limit is not None and limit <= 0:
+            return []
         events: List[Dict[str, Any]] = []
         page_token: Optional[str] = None
 
@@ -44,13 +47,15 @@ class CalendarService:
                     timeMax=time_max_iso,
                     singleEvents=True,
                     orderBy="startTime",
-                    maxResults=max_results,
+                    maxResults=min(max_results, limit - len(events)) if limit is not None else max_results,
                     pageToken=page_token,
                 )
                 .execute()
             )
             events.extend(resp.get("items", []) or [])
             page_token = resp.get("nextPageToken")
+            if limit is not None and len(events) >= limit:
+                return events[:limit]
             if not page_token:
                 break
 
@@ -94,3 +99,16 @@ class CalendarService:
         """
         # TODO: Implement event extraction using LLM
         pass
+
+
+def upcoming_calendar_events(credentials, days=7, limit=10):
+    start = datetime.now(timezone.utc)
+    end = start + timedelta(days=max(1, min(days, 30)))
+    events = CalendarService(credentials).list_events(
+        start.isoformat(), end.isoformat(), limit=max(1, min(limit, 15))
+    )
+    return [
+        {"title": (event.get("summary") or "Busy")[:200], "start": event.get("start", {}),
+         "end": event.get("end", {}), "url": event.get("htmlLink")}
+        for event in events if event.get("status") != "cancelled"
+    ]
