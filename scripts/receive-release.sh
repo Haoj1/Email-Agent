@@ -48,6 +48,9 @@ if [[ "${MAILBOX_EMBEDDINGS_ENABLED:-false}" == true ]]; then
   requirements="$release/backend/requirements-embeddings.txt"
 fi
 "$uv" pip install --python "$release/backend/.venv/bin/python" -r "$requirements"
-export APP_ROOT="$root" SERVICE_NAME=email-agent.service DEPLOY_USE_SUDO=true
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+export APP_ROOT="$root" SERVICE_NAME=email-agent.service DEPLOY_USER_SERVICE=true
 export READY_URL=http://127.0.0.1:5101/api/ready CANDIDATE_PORT=5102
+systemctl --user enable email-agent.service
 bash "$release/scripts/activate-release.sh" "$release"

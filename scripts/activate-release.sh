@@ -49,8 +49,8 @@ wait_until_ready() {
 }
 
 manage_service() {
-  if [[ "${DEPLOY_USE_SUDO:-false}" == true ]]; then
-    sudo -n /bin/systemctl "$1" "$SERVICE_NAME"
+  if [[ "${DEPLOY_USER_SERVICE:-false}" == true ]]; then
+    systemctl --user "$1" "$SERVICE_NAME"
   else
     systemctl "$1" "$SERVICE_NAME"
   fi

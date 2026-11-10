@@ -57,6 +57,6 @@ GitHub Actions builds the frontend and tests additive migrations, mailbox workfl
 
 ### cs320 release
 
-The GitHub release workflow runs verification on `main`, builds the frontend against `https://api.mail-agents.net/api`, and sends one versioned frontend/backend bundle over a dedicated SSH key. The receiver stages the bundle, creates the Python environment, migrates the database, and checks readiness before switching `/srv/email-agent/current`. Nginx serves the current frontend and proxies the API to the loopback-only service. Previous release directories remain available for rollback.
+The GitHub release workflow runs verification on `main`, builds the frontend against `https://api.mail-agents.net/api`, and sends one versioned frontend/backend bundle over a dedicated SSH key. The receiver stages the bundle, creates the Python environment, migrates the database, and checks readiness before switching `/srv/email-agent/current`. Nginx serves the current frontend and proxies the API to the loopback-only user-level systemd service. Previous release directories remain available for rollback.
 
 The cs320 service uses the `email_agent` OS user and PostgreSQL peer authentication over `/run/postgresql-email-agent`. Set production credentials in `/etc/email-agent/backend.env`. Set `MAILBOX_EMBEDDINGS_ENABLED=true` and install `requirements-embeddings.txt` when enabling semantic search.
