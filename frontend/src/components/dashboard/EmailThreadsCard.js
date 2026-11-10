@@ -11,7 +11,7 @@ function senderName(value) {
 
 export default function EmailThreadsCard({
   loadingThreads, onRefreshEmails, onLoadMore, hasMore, emailThreads, onOpenThread,
-  daysFilter, onDaysFilterChange, searchQuery, onSearchChange, onSearchSubmit, onClearSearch,
+  daysFilter, onDaysFilterChange, searchQuery, onSearchChange, onSearchSubmit, onClearSearch, searchMode, onSearchModeChange,
 }) {
   const isStandalonePage = useLocation().pathname === '/threads';
   const searchInput = useRef(null);
@@ -29,11 +29,11 @@ export default function EmailThreadsCard({
   const threads = emailThreads?.data?.threads || [];
 
   return (
-    <section className="card workspace-card conversation-card" aria-labelledby="conversations-title">
+    <section className="card workspace-card conversation-card" aria-labelledby="conversations-title" aria-busy={loadingThreads}>
       <div className="workspace-card-heading">
         <div>
           <p className="workspace-eyebrow"><WorkspaceIcon name="mail" /> MAILBOX</p>
-          <h2 id="conversations-title">Conversations</h2>
+          <h2 id="conversations-title">Inbox</h2>
         </div>
         {!isStandalonePage && <Link className="workspace-link" to="/threads">Open inbox <WorkspaceIcon name="arrow" /></Link>}
       </div>
@@ -49,6 +49,10 @@ export default function EmailThreadsCard({
         {searchQuery?.trim() && <button type="button" className="workspace-quiet" onClick={onClearSearch}>Clear</button>}
       </form>
       <div className="workspace-list-meta">
+        <div className="workspace-search-modes" role="group" aria-label="Search mode">
+          <button type="button" aria-pressed={searchMode === 'exact'} onClick={() => onSearchModeChange('exact')}>Keywords</button>
+          <button type="button" aria-pressed={searchMode === 'fuzzy'} onClick={() => onSearchModeChange('fuzzy')}>Similar spelling</button>
+        </div>
         <label className="workspace-filter">
           <span className="workspace-sr-only">Conversation date range</span>
           <select value={daysFilter || 14} onChange={event => onDaysFilterChange(Number(event.target.value))}>
@@ -56,9 +60,12 @@ export default function EmailThreadsCard({
             <option value={7}>Last week</option><option value={14}>Last 2 weeks</option><option value={30}>Last month</option>
           </select>
         </label>
-        <span role="status">{loadingThreads ? 'Loading…' : `${threads.length} loaded`}</span>
+        <span role="status">{loadingThreads ? 'Loading…' : `${threads.length} conversation${threads.length === 1 ? '' : 's'}`}</span>
         <button type="button" className="workspace-quiet" disabled={loadingThreads} onClick={onRefreshEmails}>Refresh</button>
       </div>
+      {searchMode === 'fuzzy' && <p className="workspace-search-hint">
+        Looks for close spellings in the latest 30 email subjects, senders, and previews.
+      </p>}
       {emailThreads?.success === false && <p className="workspace-error" role="alert">{emailThreads.error}</p>}
       {emailThreads?.success && threads.length === 0 && <p className="workspace-empty">No conversations found in this view.</p>}
       <ul className="conversation-list">

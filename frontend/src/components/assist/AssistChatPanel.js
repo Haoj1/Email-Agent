@@ -1,11 +1,35 @@
 import WorkspaceIcon from '../workspace/WorkspaceIcon';
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
 import '../thread/ThreadChatPanel.css';
 
-function AssistChatPanel({ onClose, selectedEmail }) {
+const quickActions = [
+  { action: 'reply_queue', label: 'Needs a reply', prompt: 'Which emails need a reply this week? Show the next action for each.' },
+  { action: 'unread', label: 'Find unread', prompt: 'Find unread emails from the past seven days. Use live Gmail search.' },
+  { action: 'attachments', label: 'Find attachments', prompt: 'Find recent conversations with PDF attachments and link to them.' },
+  { action: 'agenda', label: 'Upcoming meetings', prompt: 'What is on my calendar over the next seven days?' },
+];
+
+const toolLabels = {
+  search_mailbox: 'Searching Gmail',
+  search_mailbox_fuzzy: 'Matching spelling variations',
+  search_emails_rag: 'Searching by meaning',
+  search_related_threads: 'Finding related conversations',
+  list_thread_attachments: 'Checking attachments',
+  list_upcoming_events: 'Reading the calendar',
+  get_important_emails: 'Checking emails that need attention',
+  query_triage_results: 'Checking emails that need attention',
+  get_thread: 'Reading the conversation',
+};
+
+function sourcePath(source) {
+  const account = source.email ? `?${new URLSearchParams({ email: source.email })}` : '';
+  return `/thread/${encodeURIComponent(source.thread_id)}${account}`;
+}
+
+function AssistChatPanel({ onClose, selectedEmail, isOpen }) {
   const navigate = useNavigate();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -14,25 +38,24 @@ function AssistChatPanel({ onClose, selectedEmail }) {
   const [width, setWidth] = useState(400);
   const [isResizing, setIsResizing] = useState(false);
   const [thinkingSteps, setThinkingSteps] = useState([]);
+  const [requestNotice, setRequestNotice] = useState('');
   const [sessionId, setSessionId] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [showSessionList, setShowSessionList] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const panelRef = useRef(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const requestRef = useRef(null);
+  const messagesPane = useRef(null);
+  useEffect(() => () => requestRef.current?.abort(), []);
+  useEffect(() => {
+    if (isOpen && !loading && !isMinimized) inputRef.current?.focus();
+  }, [isOpen, loading, isMinimized]);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  // Load sessions on mount
-  useEffect(() => {
-    loadSessions();
-  }, []);
+    const pane = messagesPane.current;
+    if (pane && messagesEndRef.current) pane.scrollTop = pane.scrollHeight;
+  }, [messages, thinkingSteps]);
 
   const loadSessions = async () => {
     try {
@@ -70,11 +93,14 @@ function AssistChatPanel({ onClose, selectedEmail }) {
             timestamp: new Date(msg.timestamp || Date.now()),
             tool_calls: toolCalls,
             citations: msg.citations || [],
+            sources: msg.sources || [],
             used_web_search: usedWebSearch,
           };
         });
         setMessages(processedMessages);
         setSessionId(sessionIdToLoad);
+        setThinkingSteps([]);
+        setRequestNotice('');
         setShowSessionList(false);
       }
     } catch (error) {
@@ -86,137 +112,85 @@ function AssistChatPanel({ onClose, selectedEmail }) {
   const startNewSession = () => {
     setMessages([]);
     setSessionId(null);
+    setThinkingSteps([]);
+    setRequestNotice('');
     setShowSessionList(false);
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || loading) return;
-
-    const userMessage = input.trim();
+  const handleSend = async (value = input, action) => {
+    const userMessage = value.trim();
+    if (!userMessage || requestRef.current) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
     setInput('');
-
-    // Add user message
-    const newUserMessage = {
-      role: 'user',
-      content: userMessage,
-      timestamp: new Date(),
-    };
-    setMessages((prev) => [...prev, newUserMessage]);
+    setMessages(previous => [...previous, { role: 'user', content: userMessage, timestamp: new Date() }]);
     setLoading(true);
+    setRequestNotice('');
     setThinkingSteps([]);
 
     try {
-      // Build conversation history
-      const conversationHistory = messages.map((msg) => ({
-        role: msg.role,
-        content: msg.content,
-      }));
-
-      // Prepare request body
-      const requestBody = {
-        question: userMessage,
-        session_id: sessionId,
-        conversation_history: conversationHistory,
-        email: selectedEmail || null,
-      };
-
-      // Use fetch for SSE streaming
-      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
-      const response = await fetch(`${API_BASE_URL}/assist-chat/ask`, {
+      const history = sessionId ? undefined : messages.slice(-12).map(({ role, content }) => ({ role, content }));
+      const response = await fetch(`${api.defaults.baseURL}/assist-chat/ask`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+        body: JSON.stringify({
+          question: userMessage, action, session_id: sessionId,
+          conversation_history: history, email: selectedEmail || null,
+        }),
       });
+      if (!response.ok || !response.body) throw new Error(`Copilot request failed (${response.status}).`);
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      // Read SSE stream
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      let finalResult = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-
-              if (data.type === 'step') {
-                setThinkingSteps((prev) => [...prev, data.step]);
-              } else if (data.type === 'result') {
-                finalResult = data;
-              } else if (data.type === 'error') {
-                throw new Error(data.error);
-              }
-            } catch (e) {
-              console.error('Error parsing SSE data:', e);
-            }
+      let finalResult;
+      try {
+        while (true) {
+          const { done, value: chunk } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(chunk, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const data = JSON.parse(line.slice(6));
+            if (data.type === 'step') setThinkingSteps(previous => [...previous.slice(-7), data.step]);
+            if (data.type === 'result') finalResult = data;
+            if (data.type === 'error') throw new Error(data.error);
           }
         }
+      } finally {
+        if (!finalResult) await reader.cancel().catch(() => {});
+        reader.releaseLock();
       }
 
-      // Process final result
-      if (finalResult) {
-        if (finalResult.success) {
-          if (finalResult.session_id) {
-            setSessionId(finalResult.session_id);
-          }
-
-          const assistantMessage = {
-            role: 'assistant',
-            content: finalResult.answer,
-            citations: finalResult.citations || [],
-            tool_calls: finalResult.tool_calls || [],
-            thinking_steps: finalResult.thinking_steps || [],
-            used_web_search: !!finalResult.used_web_search,
-            timestamp: new Date(),
-          };
-          setMessages((prev) => [...prev, assistantMessage]);
-          
-          // Reload sessions to update list
-          loadSessions();
-        } else {
-          const errorMessage = {
-            role: 'assistant',
-            content: `Error: ${finalResult.error || 'Failed to get response'}`,
-            isError: true,
-            timestamp: new Date(),
-          };
-          setMessages((prev) => [...prev, errorMessage]);
-        }
-      }
-
-      // Keep thinking steps visible for a moment, then clear
-      setTimeout(() => setThinkingSteps([]), 2000);
+      if (!finalResult?.success) throw new Error(finalResult?.error || 'Copilot did not return a response.');
+      setSessionId(finalResult.session_id || null);
+      setMessages(previous => [...previous, {
+        role: 'assistant', content: finalResult.answer,
+        citations: finalResult.citations || [], sources: finalResult.sources || [],
+        tool_calls: finalResult.tool_calls || [], used_web_search: !!finalResult.used_web_search, timestamp: new Date(),
+      }]);
+      if (showSessionList) loadSessions();
     } catch (error) {
-      const errorMessage = {
-        role: 'assistant',
-        content: `Error: ${error.message || 'Failed to send message'}`,
-        isError: true,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+      if (!controller.signal.aborted) setMessages(previous => [...previous, {
+        role: 'assistant', content: error.message, isError: true, timestamp: new Date(),
+      }]);
     } finally {
+      requestRef.current = null;
       setLoading(false);
-      inputRef.current?.focus();
     }
   };
 
+  const stopResponse = () => {
+    requestRef.current?.abort();
+    setRequestNotice('Response stopped. You can ask another question.');
+  };
+
   const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSend();
     }
@@ -259,33 +233,12 @@ function AssistChatPanel({ onClose, selectedEmail }) {
     setMessages([]);
     setSessionId(null);
     setThinkingSteps([]);
-  };
-
-  const quickActions = [
-    { label: 'Important Emails', prompt: 'What important emails do I need to reply to?' },
-    { label: 'Find Emails', prompt: 'Find emails about project deadlines' },
-    { label: 'High Priority', prompt: 'Show me high-priority emails from the last week' },
-    { label: 'Need Attention', prompt: 'What emails need my attention?' },
-  ];
-
-  const appHelpPrompt =
-    'I’m new to this app. Please explain what it can do and how to use it, using the current UI names:\n\n' +
-    '- Inbox Copilot: what questions can I ask? what tools can it use?\n' +
-    '- Conversations: how do I browse threads and open a conversation?\n' +
-    '- Priority Inbox: what does “Update Priorities” do? how do filters work?\n' +
-    '- Suggested Schedule (Calendar): how do I generate suggestions, drag/resize blocks in week view, select/deselect, and Confirm & Create?\n\n' +
-    'Also include a short “typical workflow” example for a busy day.';
-
-  const handleQuickAction = (prompt) => {
-    setInput(prompt);
-    setTimeout(() => {
-      handleSend();
-    }, 100);
+    setRequestNotice('');
   };
 
   // Function to extract thread IDs from a single message
   const extractThreadIdsFromMessage = (msg) => {
-    const threadIds = new Set();
+    const threadIds = new Set((msg.sources || []).map(source => source.thread_id));
     
     // Extract from tool_calls
     if (msg.tool_calls) {
@@ -447,7 +400,7 @@ function AssistChatPanel({ onClose, selectedEmail }) {
             e.preventDefault();
             navigate(href);
           }}
-          style={{ color: '#1976d2', textDecoration: 'none', cursor: 'pointer' }}
+          className="workspace-link"
           onMouseEnter={(e) => (e.target.style.textDecoration = 'underline')}
           onMouseLeave={(e) => (e.target.style.textDecoration = 'none')}
           {...props}
@@ -468,6 +421,13 @@ function AssistChatPanel({ onClose, selectedEmail }) {
   return (
     <div
       ref={panelRef}
+      onKeyDown={event => {
+        if (event.key === 'Escape') {
+          event.stopPropagation();
+          if (showSessionList) setShowSessionList(false);
+          else onClose();
+        }
+      }}
       className={`thread-chat-panel ${isMinimized ? 'minimized' : ''}`}
       style={{ width: `${width}px` }}
     >
@@ -480,7 +440,9 @@ function AssistChatPanel({ onClose, selectedEmail }) {
         <div className="thread-chat-actions">
           <button
             className="chat-action-btn"
-            onClick={() => setShowSessionList(!showSessionList)}
+            onClick={() => { if (!showSessionList) loadSessions(); setShowSessionList(!showSessionList); }}
+            disabled={loading}
+            aria-expanded={showSessionList}
             title="Session history"
           >
             <WorkspaceIcon name="history" />
@@ -489,6 +451,7 @@ function AssistChatPanel({ onClose, selectedEmail }) {
             <button
               className="chat-action-btn clear-btn"
               onClick={handleClearHistory}
+              disabled={loading}
               title="Clear conversation"
             >
               <WorkspaceIcon name="trash" />
@@ -508,81 +471,32 @@ function AssistChatPanel({ onClose, selectedEmail }) {
       </div>
 
       {showSessionList && (
-        <div
-          style={{
-            position: 'absolute',
-            top: '48px',
-            left: '0',
-            right: '0',
-            background: 'white',
-            borderBottom: '1px solid #e0e0e0',
-            maxHeight: '300px',
-            overflowY: 'auto',
-            zIndex: 1002,
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-          }}
-        >
-          <div style={{ padding: '12px', borderBottom: '1px solid #e0e0e0' }}>
-            <button
-              onClick={startNewSession}
-              style={{
-                width: '100%',
-                padding: '8px',
-                background: '#1976d2',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontWeight: 500,
-              }}
-            >
-              + New Conversation
+        <div className="workspace-session-list">
+          <button type="button" className="btn-secondary" onClick={startNewSession} disabled={loading}>
+            <WorkspaceIcon name="add" /> New conversation
+          </button>
+          {sessions.map(session => (
+            <button type="button" key={session.session_id} className="workspace-session-row"
+              onClick={() => loadSession(session.session_id)} disabled={loading}>
+              <strong>{session.preview}</strong>
+              <small>{new Date(session.updated_at).toLocaleString()}</small>
             </button>
-          </div>
-          {sessions.map((session) => (
-            <div
-              key={session.session_id}
-              onClick={() => loadSession(session.session_id)}
-              style={{
-                padding: '12px',
-                borderBottom: '1px solid #f0f0f0',
-                cursor: 'pointer',
-                transition: 'background 0.2s',
-              }}
-              onMouseEnter={(e) => (e.target.style.background = '#f5f5f5')}
-              onMouseLeave={(e) => (e.target.style.background = 'white')}
-            >
-              <div style={{ fontSize: '13px', color: '#666', marginBottom: '4px' }}>
-                {new Date(session.updated_at).toLocaleString()}
-              </div>
-              <div style={{ fontSize: '14px', color: '#333' }}>
-                {session.preview}
-              </div>
-            </div>
           ))}
         </div>
       )}
 
       {!isMinimized && (
         <>
-          <div className="thread-chat-messages">
+          <div className="thread-chat-messages" ref={messagesPane}>
             {messages.length === 0 ? (
               <div className="chat-empty-state">
-                <p>Ask Inbox Copilot anything about your emails!</p>
+                <p className="workspace-copilot-description">Search mail, find attachments, and check your schedule.</p>
                 <div className="quick-actions">
-                  <button
-                    className="quick-action-btn primary"
-                    onClick={() => handleQuickAction(appHelpPrompt)}
-                    disabled={loading}
-                    style={{ marginBottom: '12px' }}
-                  >
-                    📖 How to Use This App
-                  </button>
                   {quickActions.map((action, idx) => (
                     <button
                       key={idx}
                       className="quick-action-btn"
-                      onClick={() => handleQuickAction(action.prompt)}
+                      onClick={() => handleSend(action.prompt, action.action)}
                       disabled={loading}
                     >
                       {action.label}
@@ -612,9 +526,13 @@ function AssistChatPanel({ onClose, selectedEmail }) {
                             </ReactMarkdown>
                           </div>
                         )}
-                        {msg.citations && msg.citations.length > 0 && (
-                          <div className="message-citations">
-                            <strong>References:</strong> {msg.citations.join(', ')}
+                        {msg.sources?.length > 0 && (
+                          <div className="workspace-copilot-sources" aria-label="Source conversations">
+                            {msg.sources.map(source => (
+                              <Link to={sourcePath(source)} key={sourcePath(source)}>
+                                <WorkspaceIcon name="link" /> {source.subject || source.thread_id}
+                              </Link>
+                            ))}
                           </div>
                         )}
                         {msg.used_web_search && (
@@ -632,77 +550,26 @@ function AssistChatPanel({ onClose, selectedEmail }) {
                     </div>
                   );
                 })}
-                {loading && (
-                  <>
-                    <div className="thinking-steps-container">
-                      {thinkingSteps.length > 0 ? (
-                        thinkingSteps.map((step, idx) => (
-                          <div key={idx} className={`thinking-step thinking-step-${step.type}`}>
-                            {step.type === 'planning' && (
-                              <>
-                                <span className="thinking-icon">🧠</span>
-                                <span className="thinking-text">{step.content}</span>
-                              </>
-                            )}
-                            {step.type === 'tool_call' && (
-                              <>
-                                <span className="thinking-icon">🔧</span>
-                                <span className="thinking-text">
-                                  Calling <strong>{step.tool}</strong>
-                                  {step.args && Object.keys(step.args).length > 0 && (
-                                    <span className="thinking-args">
-                                      {' '}
-                                      ({Object.keys(step.args).join(', ')})
-                                    </span>
-                                  )}
-                                </span>
-                              </>
-                            )}
-                            {step.type === 'tool_result' && (
-                              <>
-                                <span
-                                  className={`thinking-icon ${
-                                    step.status === 'success' ? 'success' : 'error'
-                                  }`}
-                                >
-                                  {step.status === 'success' ? '✅' : '❌'}
-                                </span>
-                                <span className="thinking-text">
-                                  {step.status === 'success' ? (
-                                    step.summary || `${step.tool} completed`
-                                  ) : (
-                                    <span className="error-text">
-                                      {step.tool} failed: {step.error || 'Unknown error'}
-                                    </span>
-                                  )}
-                                </span>
-                              </>
-                            )}
-                            {step.type === 'thinking' && (
-                              <>
-                                <span className="thinking-icon">💭</span>
-                                <span className="thinking-text">{step.content}</span>
-                              </>
-                            )}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="thinking-step">
-                          <span className="thinking-icon">🧠</span>
-                          <span className="thinking-text">Analyzing question...</span>
-                        </div>
-                      )}
-                    </div>
-                    <div className="chat-message assistant loading">
-                      <div className="message-content">
-                        <div className="typing-indicator">
-                          <span></span>
-                          <span></span>
-                          <span></span>
-                        </div>
-                      </div>
-                    </div>
-                  </>
+                {(loading || requestNotice) && (
+                  <div className="workspace-copilot-progress">
+                    <p className="workspace-copilot-status" role="status">
+                      {requestNotice || toolLabels[thinkingSteps.at(-1)?.tool] || thinkingSteps.at(-1)?.content || 'Preparing Copilot…'}
+                    </p>
+                    {loading && <button type="button" className="workspace-quiet" onClick={stopResponse}>Stop</button>}
+                  </div>
+                )}
+                {thinkingSteps.some(step => step.type === 'tool_result') && (
+                  <details className="workspace-copilot-activity">
+                    <summary>What Copilot checked</summary>
+                    <ul>
+                      {thinkingSteps.filter(step => step.type === 'tool_result').map((step, index) => (
+                        <li key={index}>
+                          <span>{toolLabels[step.tool] || 'Tool'}</span>
+                          <small>{step.summary}</small>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
                 )}
                 <div ref={messagesEndRef} />
               </>
@@ -710,33 +577,33 @@ function AssistChatPanel({ onClose, selectedEmail }) {
           </div>
 
           <div className="thread-chat-input-container">
-            <div className="quick-actions-inline">
-              {quickActions.slice(0, 2).map((action, idx) => (
-                <button
-                  key={idx}
-                  className="quick-action-btn-small"
-                  onClick={() => handleQuickAction(action.prompt)}
-                  disabled={loading}
-                  title={action.label}
-                >
-                  {action.label}
-                </button>
-              ))}
-            </div>
+            {messages.length > 0 && (
+              <details className="workspace-copilot-activity workspace-shortcuts">
+                <summary>Quick actions</summary>
+                <div className="quick-actions">
+                  {quickActions.map(action => (
+                    <button key={action.action} type="button" className="quick-action-btn"
+                      disabled={loading} onClick={() => handleSend(action.prompt, action.action)}>
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              </details>
+            )}
             <div className="input-wrapper">
               <textarea
                 ref={inputRef}
                 className="thread-chat-input"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyPress={handleKeyPress}
+                onKeyDown={handleKeyPress}
                 placeholder="Ask about your emails..."
                 rows={1}
                 disabled={loading}
               />
               <button
                 className="send-button"
-                onClick={handleSend}
+                onClick={() => handleSend()}
                 disabled={!input.trim() || loading}
                 aria-label="Send message"
               >

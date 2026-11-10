@@ -39,14 +39,6 @@ OAUTH_STATE_COOKIE = "email_agent_oauth_state"
 OAUTH_COOKIE_PATH = "/api/auth/google"
 OAUTH_STATE_SECONDS = 600
 
-def get_session_id(request: Request) -> str:
-    """Get or create session ID from cookie"""
-    session_id = request.cookies.get("session_id")
-    if not session_id:
-        import secrets
-        session_id = secrets.token_urlsafe(32)
-    return session_id
-
 @router.get("/google/login")
 async def google_login(
     request: Request,
@@ -651,7 +643,8 @@ async def handle_login(
     await db.commit()
     
     # Store user_id in session (for backward compatibility with existing session system)
-    session_id = get_session_id(request)
+    user_sessions.pop(request.cookies.get("session_id"), None)
+    session_id = secrets.token_urlsafe(32)
     user_sessions[session_id] = {
         "user_id": user.id,
         "email": user_email,

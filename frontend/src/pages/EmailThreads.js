@@ -13,6 +13,7 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
   const [emailThreadsNextPageToken, setEmailThreadsNextPageToken] = useState(null);
   const [daysFilter, setDaysFilter] = useState(14); // Default to 14 days
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchMode, setSearchMode] = useState('exact');
   
   const navigate = useNavigate();
   const { getCachedThreads, setCachedThreads } = useEmailCache();
@@ -29,13 +30,14 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
     forceRefresh = false,
     isLoadMore = false,
     days = daysFilter,
-    query = searchQuery
+    query = searchQuery,
+    mode = searchMode
   ) => {
     const trimmedQuery = (query || '').trim();
     const previous = threadsRequest.current;
     previous?.controller.abort();
     const controller = new AbortController();
-    threadsRequest.current = { email, controller };
+    threadsRequest.current = { email, controller, query: trimmedQuery, mode };
 
 
     if (!forceRefresh && !isLoadMore && !trimmedQuery) {
@@ -50,15 +52,18 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
     }
 
     setLoadingThreads(true);
-    if (!isLoadMore && (forceRefresh || previous?.email !== email)) {
-      setEmailThreads(null);
+    if (!isLoadMore) {
       setEmailThreadsNextPageToken(null);
+      if (previous?.email !== email) setEmailThreads(null);
     }
     
     try {
       const params = { max_results: 30, days: days || 14 };
       if (email) params.email = email;
-      if (trimmedQuery) params.q = trimmedQuery;
+      if (trimmedQuery) {
+        params.q = trimmedQuery;
+        if (mode === 'fuzzy') params.mode = mode;
+      }
       if (isLoadMore && emailThreadsNextPageToken) {
         params.page_token = emailThreadsNextPageToken;
       }
@@ -105,6 +110,11 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
     loadEmailThreads(selectedEmail, true, false, daysFilter, searchQuery);
   };
 
+  const handleSearchModeChange = (mode) => {
+    setSearchMode(mode);
+    if (searchQuery.trim()) loadEmailThreads(selectedEmail, true, false, daysFilter, searchQuery, mode);
+  };
+
   const handleClearSearch = () => {
     setSearchQuery('');
     loadEmailThreads(selectedEmail, true, false, daysFilter, '');
@@ -122,13 +132,15 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
         <EmailThreadsCard
           loadingThreads={loadingThreads}
           onRefreshEmails={() => loadEmailThreads(selectedEmail, true)}
-          onLoadMore={() => loadEmailThreads(selectedEmail, false, true, daysFilter, searchQuery)}
+          onLoadMore={() => loadEmailThreads(selectedEmail, false, true, daysFilter, threadsRequest.current?.query, threadsRequest.current?.mode)}
           hasMore={!!emailThreadsNextPageToken}
           emailThreads={emailThreads}
           onOpenThread={handleOpenThread}
           daysFilter={daysFilter}
           onDaysFilterChange={handleDaysFilterChange}
           searchQuery={searchQuery}
+            searchMode={searchMode}
+            onSearchModeChange={handleSearchModeChange}
           onSearchChange={handleSearchChange}
           onSearchSubmit={handleSearchSubmit}
           onClearSearch={handleClearSearch}

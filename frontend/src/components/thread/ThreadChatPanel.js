@@ -61,10 +61,10 @@ function ThreadChatPanel({ threadId, email, onClose }) {
     }
   }, [messages, saveCachedMessages]);
 
-  const handleSend = async () => {
-    if (!input.trim() || loading) return;
+  const handleSend = async (value = input) => {
+    if (!value.trim() || loading) return;
 
-    const userMessage = input.trim();
+    const userMessage = value.trim();
     setInput('');
 
     // Add user message
@@ -214,7 +214,7 @@ function ThreadChatPanel({ threadId, email, onClose }) {
   };
 
   const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSend();
     }
@@ -406,12 +406,7 @@ function ThreadChatPanel({ threadId, email, onClose }) {
     { label: 'Participants', prompt: 'Who are the main participants in this conversation?' },
   ];
 
-  const handleQuickAction = (prompt) => {
-    setInput(prompt);
-    setTimeout(() => {
-      handleSend();
-    }, 100);
-  };
+
 
   const handleClearHistory = () => {
     // Clear messages state
@@ -473,7 +468,7 @@ function ThreadChatPanel({ threadId, email, onClose }) {
                     <button
                       key={idx}
                       className="quick-action-btn"
-                      onClick={() => handleQuickAction(action.prompt)}
+                      onClick={() => handleSend(action.prompt)}
                       disabled={loading}
                     >
                       {action.label}
@@ -691,7 +686,7 @@ function ThreadChatPanel({ threadId, email, onClose }) {
                 <button
                   key={idx}
                   className="quick-action-btn-small"
-                  onClick={() => handleQuickAction(action.prompt)}
+                  onClick={() => handleSend(action.prompt)}
                   disabled={loading}
                   title={action.label}
                 >
@@ -712,7 +707,7 @@ function ThreadChatPanel({ threadId, email, onClose }) {
               />
               <button
                 className="send-button"
-                onClick={handleSend}
+                onClick={() => handleSend()}
                 disabled={!input.trim() || loading}
                 aria-label="Send message"
               >

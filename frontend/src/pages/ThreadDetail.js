@@ -1,5 +1,5 @@
 import WorkspaceIcon from '../components/workspace/WorkspaceIcon';
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../services/api';
 import { useEmailCache } from '../contexts/EmailCacheContext';
@@ -19,6 +19,16 @@ function ThreadDetail({ primaryEmail }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showChat, setShowChat] = useState(null);
+  const [remoteRelated, setRemoteRelated] = useState(null);
+  const [relatedLoading, setRelatedLoading] = useState(false);
+  const [relatedError, setRelatedError] = useState('');
+  const relatedRequest = useRef(null);
+  useEffect(() => {
+    setRemoteRelated(null);
+    setRelatedLoading(false);
+    setRelatedError('');
+    return () => relatedRequest.current?.abort();
+  }, [threadId, email]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -97,10 +107,34 @@ function ThreadDetail({ primaryEmail }) {
 
   const firstMessage = thread.messages[0];
   const subject = firstMessage.subject || '(No Subject)';
-  const cachedMailbox = getCachedThreads(email) || (email === primaryEmail ? getCachedThreads(null) : null);
+  const account = thread.email_account || email || primaryEmail;
+  const cachedMailbox = getCachedThreads(account) || (account === primaryEmail ? getCachedThreads(null) : null);
   const cached = cachedMailbox?.data?.threads || [];
   const related = findRelatedThreads(cached, { thread_id: threadId, subject: firstMessage.subject, from: firstMessage.from });
-  const relatedSearch = email ? `?${new URLSearchParams({ email })}` : '';
+  const seenRelated = new Set(related.map(item => item.thread.thread_id));
+  const allRelated = [...related, ...(remoteRelated || [])
+    .filter(item => item.thread_id !== threadId && !seenRelated.has(item.thread_id))
+    .map(item => ({ thread: item, reason: 'Gmail subject or sender match' }))];
+  const relatedSearch = account ? `?${new URLSearchParams({ email: account })}` : '';
+
+  const loadMoreRelated = async () => {
+    relatedRequest.current?.abort();
+    const controller = new AbortController();
+    relatedRequest.current = controller;
+    setRelatedLoading(true);
+    setRelatedError('');
+    try {
+      const { data } = await api.get('/gmail/related', {
+        params: { thread_id: threadId, subject: firstMessage.subject, sender: firstMessage.from, email: account },
+        signal: controller.signal,
+      });
+      if (!controller.signal.aborted) setRemoteRelated(data.threads || []);
+    } catch {
+      if (!controller.signal.aborted) setRelatedError('Could not search Gmail. Try again.');
+    } finally {
+      if (!controller.signal.aborted) setRelatedLoading(false);
+    }
+  };
 
   return (
     <div className="thread-detail-container">
@@ -132,17 +166,26 @@ function ThreadDetail({ primaryEmail }) {
         </div>
       </div>
 
-      {related.length > 0 && (
-        <section className="workspace-related" aria-labelledby="related-title">
-          <p className="workspace-eyebrow"><WorkspaceIcon name="link" /> THREAD CONTEXT</p>
-          <h2 id="related-title">Related conversations</h2>
-          <ul>{related.map(({ thread: item, reason }) => (
-            <li key={item.thread_id}>
-              <Link to={`/thread/${encodeURIComponent(item.thread_id)}${relatedSearch}`}><WorkspaceIcon name="link" /><strong>{item.subject}</strong><small>{reason}</small></Link>
-            </li>
-          ))}</ul>
-        </section>
-      )}
+      <section className="workspace-related" aria-labelledby="related-title">
+        <div className="workspace-related-head">
+          <div>
+            <p className="workspace-eyebrow"><WorkspaceIcon name="link" /> THREAD CONTEXT</p>
+            <h2 id="related-title">Related conversations</h2>
+          </div>
+          <button type="button" className="btn-secondary" onClick={loadMoreRelated} disabled={relatedLoading}>
+            <WorkspaceIcon name="search" /> {relatedLoading ? 'Searching…' : 'Search related in Gmail'}
+          </button>
+        </div>
+        {relatedError && <p className="workspace-error" role="alert">{relatedError}</p>}
+        {allRelated.length === 0 && <p className="workspace-empty">
+          {remoteRelated ? 'No related conversations found in the last 30 days.' : 'Search Gmail by this conversation’s subject and sender.'}
+        </p>}
+        <ul>{allRelated.map(({ thread: item, reason }) => (
+          <li key={item.thread_id}>
+            <Link to={`/thread/${encodeURIComponent(item.thread_id)}${relatedSearch}`}><WorkspaceIcon name="link" /><strong>{item.subject}</strong><small>{reason}</small></Link>
+          </li>
+        ))}</ul>
+      </section>
       <div className="thread-content">
         {thread.messages.map((message, index) => {
           const emailAddress = formatEmailAddress(message.from);

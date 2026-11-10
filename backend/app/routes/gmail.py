@@ -1,18 +1,21 @@
 """
 Gmail API routes - email query and management
 """
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Depends, Query, Request, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from typing import Optional, List
+from typing import Literal, Optional, List
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 from app.database import get_db
 from app.routes.auth import get_user_credentials, get_current_user_id
 from app.services.gmail_service import GmailService
+from app.services.mail_search import fuzzy_search, search_related
 from app.models import UserEmail
 
 router = APIRouter()
@@ -25,6 +28,49 @@ class SyncRequest(BaseModel):
     email: Optional[str] = None
 
 
+def _list_gmail_threads(credentials, max_results, days, q, page_token):
+    details, next_page_token, total = GmailService(credentials).list_thread_page(
+        max_results, days, query=q, page_token=page_token
+    )
+    thread_list = []
+    for thread_detail in details:
+        try:
+            messages = thread_detail.get('messages', [])
+            if not messages:
+                continue
+
+            # Get the latest message
+            latest_message = messages[-1]
+            headers = latest_message.get('payload', {}).get('headers', [])
+
+            from_header = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
+            subject_header = next((h['value'] for h in headers if h['name'] == 'Subject'), '(No Subject)')
+            date_header = next((h['value'] for h in headers if h['name'] == 'Date'), 'Unknown')
+            to_header = next((h['value'] for h in headers if h['name'] == 'To'), 'Unknown')
+
+            thread_list.append({
+                "thread_id": thread_detail['id'],
+                "from": from_header,
+                "to": to_header,
+                "subject": subject_header,
+                "date": date_header,
+                "snippet": latest_message.get('snippet', ''),
+                "message_count": len(messages),
+                "label_ids": latest_message.get('labelIds', [])
+            })
+        except Exception as e:
+            print(f"Gmail metadata normalization failed: {type(e).__name__}")
+            continue
+
+    return {
+        "success": True,
+        "thread_count": len(thread_list),
+        "total_estimated": total,
+        "threads": thread_list,
+        "next_page_token": next_page_token
+    }
+
+
 @router.get("/gmail/threads")
 async def get_email_threads(
     request: Request,
@@ -32,7 +78,8 @@ async def get_email_threads(
     days: int = Query(7, ge=1, le=30, description="Number of days to look back"),
     email: Optional[str] = Query(None, description="Email to use (default: primary)"),
     page_token: Optional[str] = Query(None, description="Page token for pagination"),
-    q: Optional[str] = Query(None, description="Gmail search query (uses Gmail's search syntax)"),
+    q: Optional[str] = Query(None, max_length=500, description="Gmail search query"),
+    mode: Literal["exact", "fuzzy"] = "exact",
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -43,76 +90,20 @@ async def get_email_threads(
     try:
         # Get credentials
         credentials = await get_user_credentials(request, email, db)
-        service = build('gmail', 'v1', credentials=credentials)
-        
-        # Calculate query
-        # If custom search query q is provided, use it directly (no time restriction)
-        # Otherwise, default to recent threads using an after: filter
-        if q:
-            query = q
-        else:
-            after_date = (datetime.now() - timedelta(days=days)).strftime('%Y/%m/%d')
-            query = f'after:{after_date}'
-        
-        # Get threads
-        list_params = {
-            "userId": 'me',
-            "maxResults": max_results,
-            "q": query
-        }
-        if page_token:
-            list_params["pageToken"] = page_token
-            
-        result = service.users().threads().list(**list_params).execute()
-        
-        threads = result.get('threads', [])
-        next_page_token = result.get('nextPageToken')
-        thread_list = []
-        
-        # Get detailed information for each thread
-        for thread in threads:
-            try:
-                thread_detail = service.users().threads().get(
-                    userId='me',
-                    id=thread['id'],
-                    format='metadata',
-                    metadataHeaders=['From', 'Subject', 'Date', 'To']
-                ).execute()
-                
-                messages = thread_detail.get('messages', [])
-                if not messages:
-                    continue
-                
-                # Get the latest message
-                latest_message = messages[-1]
-                headers = latest_message.get('payload', {}).get('headers', [])
-                
-                from_header = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
-                subject_header = next((h['value'] for h in headers if h['name'] == 'Subject'), '(No Subject)')
-                date_header = next((h['value'] for h in headers if h['name'] == 'Date'), 'Unknown')
-                to_header = next((h['value'] for h in headers if h['name'] == 'To'), 'Unknown')
-                
-                thread_list.append({
-                    "thread_id": thread['id'],
-                    "from": from_header,
-                    "to": to_header,
-                    "subject": subject_header,
-                    "date": date_header,
-                    "snippet": latest_message.get('snippet', ''),
-                    "message_count": len(messages),
-                    "label_ids": latest_message.get('labelIds', [])
-                })
-            except Exception as e:
-                print(f"Error getting thread {thread.get('id')}: {e}")
-                continue
-        
-        return {
-            "success": True,
-            "thread_count": len(thread_list),
-            "total_estimated": result.get('resultSizeEstimate', 0),
-            "threads": thread_list,
-            "next_page_token": next_page_token
-        }
+        if mode == "fuzzy" and q and q.strip():
+            if len(q) > 200:
+                raise HTTPException(status_code=400, detail="Use a short keyword or sender name for fuzzy search.")
+            threads, scanned = await asyncio.to_thread(
+                fuzzy_search, GmailService(credentials), q, days, max_results
+            )
+            return {
+                "success": True, "threads": threads, "thread_count": len(threads),
+                "total_estimated": len(threads), "next_page_token": None,
+                "search_mode": "fuzzy", "scanned": scanned,
+            }
+        return await asyncio.to_thread(_list_gmail_threads, credentials, max_results, days, q, page_token)
+    except HTTPException:
+        raise
     except Exception as e:
         error_str = str(e)
         print(f"Error getting email threads: {e}")
@@ -127,6 +118,22 @@ async def get_email_threads(
                 status_code=500,
                 detail=f"Failed to get email threads: {error_str}"
             )
+
+
+@router.get("/gmail/related")
+async def get_related_conversations(
+    request: Request,
+    thread_id: str = Query(..., min_length=1, max_length=120),
+    subject: Optional[str] = Query(None, max_length=250),
+    sender: Optional[str] = Query(None, max_length=250),
+    email: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    credentials = await get_user_credentials(request, email, db)
+    threads = await asyncio.to_thread(
+        search_related, GmailService(credentials), subject, sender, 30, 6, thread_id
+    )
+    return {"threads": threads}
 
 
 @router.get("/gmail/threads/{thread_id}")

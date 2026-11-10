@@ -1,6 +1,8 @@
 import React from 'react';
 
 const paths = {
+  sun: 'M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2M16 12a4 4 0 1 1-8 0 4 4 0 1 1 8 0Z',
+  moon: 'M20 15.5A8 8 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z',
   overview: 'M3.5 4h7v7h-7zM13.5 4h7v4h-7zM13.5 11h7v9h-7zM3.5 14h7v6h-7z',
   mail: 'M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Zm0 1 8 6 8-6',
   priority: 'M4 5h16M4 12h10M4 19h5m8-5 3 3-3 3-3-3z',

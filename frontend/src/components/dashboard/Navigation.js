@@ -3,12 +3,12 @@ import { Link, NavLink } from 'react-router-dom';
 import WorkspaceIcon from '../workspace/WorkspaceIcon';
 
 const pages = [
-  { path: '/dashboard', icon: 'overview', label: 'Overview' },
-  { path: '/threads', icon: 'mail', label: 'Conversations' },
-  { path: '/triage', icon: 'priority', label: 'Priority inbox' },
+  { path: '/dashboard', icon: 'overview', label: 'Home' },
+  { path: '/threads', icon: 'mail', label: 'Inbox' },
+  { path: '/triage', icon: 'priority', label: 'Needs attention' },
 ];
 
-export default function Navigation({ user, selectedEmail, onSelectEmail, onLogout }) {
+export default function Navigation({ user, selectedEmail, onSelectEmail, onLogout, onTabIntent, theme, onToggleTheme }) {
   const accounts = user?.emails || [];
   const current = accounts.find(account => account.email === selectedEmail)?.email
     || user?.primary_email || accounts[0]?.email || user?.email || '';
@@ -22,7 +22,7 @@ export default function Navigation({ user, selectedEmail, onSelectEmail, onLogou
       <nav className="workspace-nav" aria-label="Workspace navigation">
         <p className="workspace-nav-label">WORKSPACE</p>
         {pages.map(({ path, icon, label }) => (
-          <NavLink key={path} to={path}>
+          <NavLink key={path} to={path} onPointerEnter={() => onTabIntent(path)} onFocus={() => onTabIntent(path)}>
             <WorkspaceIcon name={icon} />{label}
           </NavLink>
         ))}
@@ -38,6 +38,11 @@ export default function Navigation({ user, selectedEmail, onSelectEmail, onLogou
             </select>
           </label>
         ) : current && <span className="workspace-account-single" title={current}>{current}</span>}
+        <button type="button" className="workspace-theme" onClick={onToggleTheme}
+          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
+          <WorkspaceIcon name={theme === 'dark' ? 'sun' : 'moon'} />
+          <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+        </button>
         <button type="button" className="workspace-logout" onClick={onLogout}><WorkspaceIcon name="logout" /> Sign out</button>
       </div>
     </aside>

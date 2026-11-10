@@ -9,18 +9,39 @@ import Dashboard from './pages/Dashboard';
 import './App.css';
 import './Workspace.css';
 
-const EmailThreadsPage = lazy(() => import('./pages/EmailThreads'));
-const EmailTriagePage = lazy(() => import('./pages/EmailTriage'));
+const loadThreads = () => import('./pages/EmailThreads');
+const loadPriority = () => import('./pages/EmailTriage');
+const EmailThreadsPage = lazy(loadThreads);
+const EmailTriagePage = lazy(loadPriority);
+
+function preloadTab(path) {
+  const load = path === '/threads' ? loadThreads : path === '/triage' ? loadPriority : null;
+  load?.().catch(() => {});
+}
 const ThreadDetail = lazy(() => import('./pages/ThreadDetail'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const TermsOfService = lazy(() => import('./pages/TermsOfService'));
 
 const pageLoading = <p className="workspace-route-loading" role="status">Loading view…</p>;
 
+function initialTheme() {
+  try {
+    const value = localStorage.getItem('emailAgentTheme');
+    if (value === 'light' || value === 'dark') return value;
+  } catch {}
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
 // Inner component that has access to EmailCache context
 function AppContent() {
   const { resetPendingTriageCount, clearCooldownCache } = useEmailCache();
   const [user, setUser] = useState(null);
+  const [theme, setTheme] = useState(initialTheme);
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    try { localStorage.setItem('emailAgentTheme', next); } catch {}
+  };
   const [loading, setLoading] = useState(true);
   const [selectedEmail, setSelectedEmail] = useState(() => {
     try {
@@ -68,8 +89,8 @@ function AppContent() {
   if (loading) return <div className="loading">Loading...</div>;
 
   return (
-    <Router>
-      <div className="App">
+    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <div className="App" data-theme={theme}>
         <Routes>
           <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
@@ -81,6 +102,9 @@ function AppContent() {
               element={
                 <div className="workspace-shell">
                   <Navigation
+                    onTabIntent={preloadTab}
+                    theme={theme}
+                    onToggleTheme={toggleTheme}
                     user={user}
                     selectedEmail={selectedEmail}
                     onSelectEmail={handleSelectEmail}

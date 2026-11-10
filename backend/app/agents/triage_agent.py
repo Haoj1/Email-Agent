@@ -82,19 +82,9 @@ class TriageAgent:
                 "key_points": key_points if isinstance(key_points, list) else []
             }
         except Exception as e:
-            # Fallback: return basic classification
-            import traceback
-            print(f"Error in triage_thread for thread {thread_data.get('thread_id')}: {e}")
-            print(f"Response content: {response.content if 'response' in locals() else 'N/A'}")
-            print(f"Traceback: {traceback.format_exc()}")
-            return {
-                "thread_id": thread_data.get("thread_id"),
-                "label": "FYI",
-                "priority": 0.5,
-                "summary": "Unable to analyze email content.",
-                "key_points": []
-            }
-    
+            print(f"Email classification failed: {type(e).__name__}")
+            return {"thread_id": thread_data.get("thread_id"), "classification_failed": True}
+
     def _get_system_prompt(self) -> str:
         """System prompt for the Triage Agent"""
         return """You are an expert email triage assistant. Your task is to analyze email threads and classify them into categories, assign priority scores, and extract key information.

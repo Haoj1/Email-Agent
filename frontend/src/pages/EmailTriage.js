@@ -11,13 +11,15 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
     checkingPending, 
     checkPendingTriage, 
     triageRunning,
+    reviewUnclear,
+    setReviewUnclear,
     triageProgress,
     triageStatus,
     triageLastComplete,
     triageLastError,
     triageAccountInfo,
     runTriage,
-    setTriageAccountInfo
+    getTriageCursors
   } = useEmailCache();
   const [triageResults, setTriageResults] = useState(null);
   const [triagePage, setTriagePage] = useState(0);
@@ -27,13 +29,11 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
   const [triageDaysFilter, setTriageDaysFilter] = useState(3);
   
   const navigate = useNavigate();
-  const triagePollingRef = useRef(null);
   const pendingTriageCheckIntervalRef = useRef(null);
   const { getCachedTriageResults, setCachedTriageResults } = useEmailCache();
 
   useEffect(() => {
     return () => {
-      stopTriagePolling();
       if (pendingTriageCheckIntervalRef.current) {
         clearInterval(pendingTriageCheckIntervalRef.current);
         pendingTriageCheckIntervalRef.current = null;
@@ -65,13 +65,6 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, selectedEmail]);
 
-  const stopTriagePolling = () => {
-    if (triagePollingRef.current) {
-      clearTimeout(triagePollingRef.current);
-      triagePollingRef.current = null;
-    }
-  };
-
   const sortTriageData = (triageData) => {
     if (!triageData?.success || !Array.isArray(triageData.data?.results)) return triageData;
     return {
@@ -83,29 +76,10 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
     };
   };
 
-  const handleRunTriage = async () => {
-    stopTriagePolling();
-    // Clear old results so progress UI is visible while running
-    setTriageResults(null);
-    // Run triage across all connected email accounts so user doesn't need to switch manually
-    const emails = (user?.emails || []).map((e) => e.email).filter(Boolean);
-    const uniqueEmails = Array.from(new Set(emails));
-    if (uniqueEmails.length === 0 && selectedEmail) {
-      setTriageAccountInfo({ email: selectedEmail, index: 0, total: 1 });
-      await runTriage({ email: selectedEmail, days: 7, max_results: 100 });
-    } else if (uniqueEmails.length === 0) {
-      setTriageAccountInfo({ email: null, index: 0, total: 1 });
-      await runTriage({ email: null, days: 7, max_results: 100 });
-    } else {
-      for (let i = 0; i < uniqueEmails.length; i += 1) {
-        const email = uniqueEmails[i];
-        setTriageAccountInfo({ email, index: i, total: uniqueEmails.length });
-        // eslint-disable-next-line no-await-in-loop
-        await runTriage({ email, days: 7, max_results: 100 });
-      }
-    }
-    setTriageAccountInfo(null);
-  };
+  const handleRunTriage = () => runTriage({
+    emails: user?.emails?.map(account => account.email).filter(Boolean) || [],
+    userId: user?.user_id,
+  });
 
   const loadTriageResults = async (label = null, forceRefresh = false, returnData = false, isLoadMore = false, days = triageDaysFilter) => {
     if (!forceRefresh && !label && !isLoadMore && !days) {
@@ -163,27 +137,11 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
   };
 
   useEffect(() => {
-    if (!triageLastComplete) return;
-
-    const triageData = sortTriageData({
-      success: triageLastComplete.success,
-      data: {
-        processed_count: triageLastComplete.processed_count,
-        results: triageLastComplete.results || [],
-        message: triageLastComplete.message,
-      },
-    });
-
-    setTriageResults(triageData);
-    setCachedTriageResults(null, triageData);
-    loadTriageResults(null, true);
+    if (triageLastComplete) loadTriageResults(null, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triageLastComplete?.run_id]);
 
-  useEffect(() => {
-    if (!triageLastError) return;
-    setTriageResults({ success: false, error: triageLastError.error || 'Unknown error' });
-  }, [triageLastError]);
+
 
   return (
     <div className="dashboard-container">
@@ -193,6 +151,11 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
           loadingTriageResults={loadingTriageResults}
           triageResults={triageResults}
           triageProgress={triageProgress}
+          triageLastComplete={triageLastComplete}
+          triageLastError={triageLastError}
+          hasContinuation={Object.keys(getTriageCursors(user?.user_id)).length > 0}
+            reviewUnclear={reviewUnclear}
+            onReviewUnclearChange={setReviewUnclear}
           triageStatus={triageStatus}
           triageAccountInfo={triageAccountInfo}
           pendingCount={pendingTriageCount}

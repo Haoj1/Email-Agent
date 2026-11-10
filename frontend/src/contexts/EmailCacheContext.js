@@ -27,6 +27,7 @@ export const EmailCacheProvider = ({ children }) => {
 
   // Global triage run state (shared between Dashboard and /triage page)
   const [triageRunning, setTriageRunning] = useState(false);
+  const [reviewUnclear, setReviewUnclear] = useState(false);
   const [triageProgress, setTriageProgress] = useState({ current: 0, total: 0, progress: 0 });
   const [triageStatus, setTriageStatus] = useState('');
   const [triageLastComplete, setTriageLastComplete] = useState(null); // { run_id, ...payload }
@@ -172,119 +173,104 @@ export const EmailCacheProvider = ({ children }) => {
     }
   }, []);
 
-  // Global Run Triage (SSE streaming) shared across pages
-  const runTriage = useCallback(async ({ email = null, days = 7, max_results = 100 } = {}) => {
-    if (triageRunning) return;
+  const getTriageCursors = useCallback(userId => {
+    try { return JSON.parse(sessionStorage.getItem(`emailAgentTriage:${userId}`) || '{}'); }
+    catch { return {}; }
+  }, []);
 
-    // Cancel any previous run (safety)
-    try {
-      if (triageAbortRef.current) triageAbortRef.current.abort();
-    } catch {}
+  const runTriage = useCallback(async ({ emails, userId, days = 7 }) => {
+    if (triageAbortRef.current) return;
+    const accounts = [...new Set(emails.length ? emails : [null])];
+    const cursors = getTriageCursors(userId);
+    const key = account => account || 'primary';
+    const pending = accounts.filter(account => cursors[key(account)]);
+    const queue = pending.length ? pending : accounts;
+    const controller = new AbortController();
+    triageAbortRef.current = controller;
+    const runId = ++triageRunIdRef.current;
+    let processed = 0;
+    let skipped = 0;
+    let scanned = 0;
+    let aiCalls = 0;
+    let aiReviewed = 0;
+    let aiUnavailable = false;
 
-    const runId = triageRunIdRef.current + 1;
-    triageRunIdRef.current = runId;
+    const saveCursors = () => {
+      try { sessionStorage.setItem(`emailAgentTriage:${userId}`, JSON.stringify(cursors)); } catch {}
+    };
+
+    const scanPage = async (email, cursor) => {
+      const response = await fetch(`${api.defaults.baseURL}/triage/run`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        signal: controller.signal, body: JSON.stringify({ max_results: 25, days, email, cursor, review_unclear: reviewUnclear }),
+      });
+      if (!response.ok || !response.body) throw new Error(`Scan failed (${response.status}).`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const event = JSON.parse(line.slice(6));
+            if (event.type === 'status') setTriageStatus(event.message);
+            if (event.type === 'progress') setTriageProgress(event);
+            if (event.type === 'complete' || event.type === 'error') return event;
+          }
+        }
+      } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
+      }
+      throw new Error('Scan interrupted. Run it again to continue.');
+    };
 
     setTriageLastError(null);
     setTriageLastComplete(null);
     setTriageRunning(true);
-    setTriageProgress({ current: 0, total: 0, progress: 0 });
-    setTriageStatus('Starting triage...');
-
-    const controller = new AbortController();
-    triageAbortRef.current = controller;
-
     try {
-      const baseURL = api.defaults.baseURL || 'http://localhost:5001/api';
-      const response = await fetch(`${baseURL}/triage/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        signal: controller.signal,
-        body: JSON.stringify({
-          max_results,
-          days,
-          email: email || null,
-        }),
-      });
-
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      if (!response.body) throw new Error('No response body for triage stream');
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        // Ignore updates from stale runs
-        if (triageRunIdRef.current !== runId) continue;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          let data;
-          try {
-            data = JSON.parse(line.slice(6));
-          } catch (e) {
-            console.error('Error parsing SSE data:', e);
-            continue;
-          }
-
-          if (triageRunIdRef.current !== runId) continue;
-
-          if (data.type === 'status') {
-            setTriageStatus(data.message || '');
-          } else if (data.type === 'progress') {
-            setTriageProgress({
-              current: data.current || 0,
-              total: data.total || 0,
-              progress: data.progress || 0,
-            });
-          } else if (data.type === 'complete') {
-            setTriageLastComplete({
-              run_id: runId,
-              email: email || null,
-              success: data.success,
-              processed_count: data.processed_count,
-              results: data.results || [],
-              message: data.message,
-              completed_at: Date.now(),
-            });
-            setTriageRunning(false);
-            setTriageStatus('');
-            setTriageProgress({
-              current: data.total || data.current || 0,
-              total: data.total || 0,
-              progress: 100,
-            });
-
-            // Clear pending count after a successful run and force refresh stats
-            if (data.success) {
-              setPendingTriageCount(0);
-              checkPendingTriage(null, true);
+      for (const [index, account] of queue.entries()) {
+        setTriageAccountInfo({ email: account, index, total: queue.length });
+        for (let page = 1; page <= 4; page += 1) {
+          setTriageStatus(page === 1 ? 'Checking recent emails…' : 'Checking the next group of emails…');
+          setTriageProgress({ current: 0, total: 0, progress: 0 });
+          const result = await scanPage(account, cursors[key(account)] || null);
+          if (result.type === 'error' || !result.success) {
+            if (result.code === 'cursor_expired') {
+              delete cursors[key(account)];
+              saveCursors();
             }
-          } else if (data.type === 'error') {
-            const errMsg = data.error || 'Unknown error';
-            setTriageLastError({ run_id: runId, error: errMsg });
-            setTriageRunning(false);
-            setTriageStatus('');
+            throw new Error(result.error || 'The current page could not be scanned.');
           }
+          scanned += result.scanned_count || 0;
+          skipped += result.skipped_count || 0;
+          aiCalls += result.ai_calls || 0;
+          aiReviewed += result.ai_reviewed || 0;
+          aiUnavailable ||= Boolean(result.ai_unavailable);
+          processed += result.processed_count || 0;
+          if (result.next_cursor) cursors[key(account)] = result.next_cursor;
+          else delete cursors[key(account)];
+          saveCursors();
+          if (!result.next_cursor) break;
         }
       }
     } catch (error) {
-      if (triageRunIdRef.current === runId) {
-        const errMsg = error?.message || String(error);
-        setTriageLastError({ run_id: runId, error: errMsg });
-        setTriageRunning(false);
-        setTriageStatus('');
-      }
+      if (!controller.signal.aborted) setTriageLastError({ run_id: runId, error: error.message });
+    } finally {
+      const hasMore = accounts.some(account => cursors[key(account)]);
+      setTriageLastComplete({ run_id: runId, processed_count: processed, scanned, skipped, hasMore, aiCalls, aiReviewed, aiUnavailable });
+      setPendingTriageCount(previous => Math.max(0, previous - processed));
+      setTriageAccountInfo(null);
+      setTriageRunning(false);
+      setTriageStatus('');
+      triageAbortRef.current = null;
     }
-  }, [checkPendingTriage, triageRunning]);
+  }, [getTriageCursors, reviewUnclear]);
 
   // Reset pending triage count (e.g., after running triage)
   const resetPendingTriageCount = useCallback(() => {
@@ -314,12 +300,15 @@ export const EmailCacheProvider = ({ children }) => {
     checkPendingTriage,
     // Global triage run state
     triageRunning,
+    reviewUnclear,
+    setReviewUnclear,
     triageProgress,
     triageStatus,
     triageLastComplete,
     triageLastError,
     triageAccountInfo,
     runTriage,
+    getTriageCursors,
     resetPendingTriageCount,
     clearCooldownCache,
     setTriageAccountInfo,

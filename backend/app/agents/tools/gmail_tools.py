@@ -5,6 +5,7 @@ Provides read-only tools for querying Gmail data
 from typing import Optional, List, Dict, Any
 from langchain_core.tools import tool
 from app.services.gmail_service import GmailService
+from app.services.mail_search import search_related
 import re
 
 
@@ -171,6 +172,13 @@ def list_attachments_tool(message_id: str, email: Optional[str] = None) -> Dict[
 
 
 # Helper functions to create tool instances with GmailService
+def _trim_context(thread):
+    for message in thread.get("messages", []):
+        message.pop("body_html", None)
+        message["body_text"] = (message.get("body_text") or "")[:1500]
+    return thread
+
+
 def create_gmail_tools(gmail_service: GmailService, email: Optional[str] = None):
     """
     Create tool instances bound to a GmailService instance.
@@ -182,11 +190,11 @@ def create_gmail_tools(gmail_service: GmailService, email: Optional[str] = None)
         """Get full thread details"""
         try:
             thread_data = gmail_service.get_thread_full(thread_id)
-            normalized = gmail_service.normalize_thread(thread_data)
+            normalized = gmail_service.normalize_thread(thread_data, message_limit=4)
             if normalized:
                 return {
                     "success": True,
-                    "thread": normalized
+                    "thread": _trim_context(normalized)
                 }
             return {"success": False, "error": "Failed to normalize thread"}
         except Exception as e:
@@ -196,12 +204,12 @@ def create_gmail_tools(gmail_service: GmailService, email: Optional[str] = None)
     def batch_get_threads(thread_ids: List[str]) -> Dict[str, Any]:
         """Get multiple threads"""
         threads = {}
-        for tid in thread_ids[:10]:  # Limit to 10 at a time
+        for tid in thread_ids[:5]:  # Bound the context sent to the agent
             try:
                 thread_data = gmail_service.get_thread_full(tid)
-                normalized = gmail_service.normalize_thread(thread_data)
+                normalized = gmail_service.normalize_thread(thread_data, message_limit=4)
                 if normalized:
-                    threads[tid] = normalized
+                    threads[tid] = _trim_context(normalized)
             except Exception as e:
                 threads[tid] = {"error": str(e)}
         return {"success": True, "threads": threads}
@@ -217,41 +225,9 @@ def create_gmail_tools(gmail_service: GmailService, email: Optional[str] = None)
     ) -> Dict[str, Any]:
         """Search for related threads"""
         try:
-            # Build Gmail query
-            query_parts = []
-            if from_email:
-                query_parts.append(f"from:{from_email}")
-            elif domain:
-                query_parts.append(f"from:{domain}")
-            elif participants:
-                # Use first participant
-                query_parts.append(f"from:{participants[0]}")
-            
-            if subject_keywords:
-                query_parts.append(f'subject:"{subject_keywords}"')
-            
-            from datetime import datetime, timedelta
-            after_date = (datetime.now() - timedelta(days=days)).strftime('%Y/%m/%d')
-            query_parts.append(f"after:{after_date}")
-            
-            query = " ".join(query_parts)
-            
-            # Get threads
-            raw_threads = gmail_service.get_threads(max_results=max_results, days=days)
-            
-            results = []
-            for thread_data in raw_threads[:max_results]:
-                normalized = gmail_service.normalize_thread(thread_data)
-                if normalized:
-                    results.append({
-                        "thread_id": normalized["thread_id"],
-                        "subject": normalized["subject"],
-                        "from": normalized["participants"]["from"],
-                        "date": normalized["latest_message_date"],
-                        "snippet": normalized["messages"][-1].get("snippet", "") if normalized["messages"] else ""
-                    })
-            
-            return {"success": True, "threads": results}
+            sender = from_email or domain or (participants[0] if participants else None)
+            threads = search_related(gmail_service, subject_keywords, sender, days, max_results)
+            return {"success": True, "threads": threads}
         except Exception as e:
             return {"success": False, "error": str(e)}
     
@@ -271,7 +247,7 @@ def create_gmail_tools(gmail_service: GmailService, email: Optional[str] = None)
             
             scored_segments = []
             for msg in normalized["messages"]:
-                body = _clean_text(msg.get("body", "") or msg.get("snippet", ""))
+                body = _clean_text(msg.get("body_text") or msg.get("snippet", ""))
                 body_lower = body.lower()
                 
                 # Score based on keyword matches
@@ -352,7 +328,7 @@ def create_gmail_tools(gmail_service: GmailService, email: Optional[str] = None)
             
             # Get latest message content
             latest_message = normalized.get('messages', [{}])[-1] if normalized.get('messages') else {}
-            latest_body = latest_message.get('body', '') or latest_message.get('snippet', '')
+            latest_body = latest_message.get('body_text') or latest_message.get('snippet', '')
             
             # Use LLM to generate draft (simplified version, can be enhanced)
             from langchain_core.messages import SystemMessage, HumanMessage

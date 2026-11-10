@@ -6,7 +6,6 @@ import EmailAccountsCard from '../components/dashboard/EmailAccountsCard';
 import AssistChatCard from '../components/dashboard/AssistChatCard';
 import EmailThreadsCard from '../components/dashboard/EmailThreadsCard';
 import EmailTriageCard from '../components/dashboard/EmailTriageCard';
-import InboxSignal from '../components/workspace/InboxSignal';
 import WorkspaceIcon from '../components/workspace/WorkspaceIcon';
 import './Dashboard.css';
 
@@ -19,13 +18,15 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     checkingPending, 
     checkPendingTriage, 
     triageRunning,
+    reviewUnclear,
+    setReviewUnclear,
     triageProgress,
     triageStatus,
     triageLastComplete,
     triageLastError,
     triageAccountInfo,
     runTriage,
-    setTriageAccountInfo
+    getTriageCursors
   } = useEmailCache();
   const [emailThreads, setEmailThreads] = useState(null);
   const [loadingThreads, setLoadingThreads] = useState(false);
@@ -40,6 +41,8 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   // Default to last 3 days for better signal-to-noise
   const [triageDaysFilter, setTriageDaysFilter] = useState(3);
   const [threadsSearchQuery, setThreadsSearchQuery] = useState('');
+  const [searchMode, setSearchMode] = useState('exact');
+  const [threadDays, setThreadDays] = useState(14);
   
   const [addingEmail, setAddingEmail] = useState(false);
   const [addEmailError, setAddEmailError] = useState(null);
@@ -99,28 +102,12 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     return () => window.cancelAnimationFrame(id);
   }, [showOnboarding, onboardingStep]);
 
-  const triagePollingRef = useRef(null);
-  const TRIAGE_POLL_INTERVAL = 3000; 
-  const TRIAGE_POLL_MAX_ATTEMPTS = 10;
-
-  const stopTriagePolling = () => {
-    if (triagePollingRef.current) {
-      clearTimeout(triagePollingRef.current);
-      triagePollingRef.current = null;
-    }
-  };
-
-  useEffect(() => {
-    return () => stopTriagePolling();
-  }, []);
-
-
-  const loadEmailThreads = async (email = null, forceRefresh = false, isLoadMore = false, days = 14, query = threadsSearchQuery) => {
+  const loadEmailThreads = async (email = null, forceRefresh = false, isLoadMore = false, days = threadDays, query = threadsSearchQuery, mode = searchMode) => {
     const trimmedQuery = (query || '').trim();
     const previous = threadsRequest.current;
     previous?.controller.abort();
     const controller = new AbortController();
-    threadsRequest.current = { email, controller };
+    threadsRequest.current = { email, controller, query: trimmedQuery, mode };
 
 
     if (!forceRefresh && !isLoadMore && !trimmedQuery) {
@@ -134,15 +121,18 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     }
 
     setLoadingThreads(true);
-    if (!isLoadMore && (forceRefresh || previous?.email !== email)) {
-      setEmailThreads(null);
+    if (!isLoadMore) {
       setEmailThreadsNextPageToken(null);
+      if (previous?.email !== email) setEmailThreads(null);
     }
     
     try {
       const params = { max_results: 30, days: days || 14 };
       if (email) params.email = email;
-      if (trimmedQuery) params.q = trimmedQuery;
+      if (trimmedQuery) {
+        params.q = trimmedQuery;
+        if (mode === 'fuzzy') params.mode = mode;
+      }
       if (isLoadMore && emailThreadsNextPageToken) {
         params.page_token = emailThreadsNextPageToken;
       }
@@ -187,29 +177,10 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     };
   };
 
-  const handleRunTriage = async () => {
-    stopTriagePolling();
-    // Clear old results so progress UI is visible while running
-    setTriageResults(null);
-    // Run triage across all connected email accounts so user doesn't need to switch manually
-    const emails = (user?.emails || []).map((e) => e.email).filter(Boolean);
-    const uniqueEmails = Array.from(new Set(emails));
-    if (uniqueEmails.length === 0 && selectedEmail) {
-      setTriageAccountInfo({ email: selectedEmail, index: 0, total: 1 });
-      await runTriage({ email: selectedEmail, days: 7, max_results: 100 });
-    } else if (uniqueEmails.length === 0) {
-      setTriageAccountInfo({ email: null, index: 0, total: 1 });
-      await runTriage({ email: null, days: 7, max_results: 100 });
-    } else {
-      for (let i = 0; i < uniqueEmails.length; i += 1) {
-        const email = uniqueEmails[i];
-        setTriageAccountInfo({ email, index: i, total: uniqueEmails.length });
-        // eslint-disable-next-line no-await-in-loop
-        await runTriage({ email, days: 7, max_results: 100 });
-      }
-    }
-    setTriageAccountInfo(null);
-  };
+  const handleRunTriage = () => runTriage({
+    emails: user?.emails?.map(account => account.email).filter(Boolean) || [],
+    userId: user?.user_id,
+  });
 
   const loadTriageResults = async (label = null, forceRefresh = false, returnData = false, isLoadMore = false, days = triageDaysFilter) => {
     if (!forceRefresh && !label && !isLoadMore && !days) {
@@ -257,45 +228,12 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     }
   };
 
-  const startTriagePolling = () => {
-    stopTriagePolling();
-    let attempts = 0;
-    const poll = async () => {
-      attempts += 1;
-      const data = await loadTriageResults(null, true, true);
-      const hasResults = data?.success && Array.isArray(data.data?.results) && data.data.results.length > 0;
-      if (hasResults || attempts >= TRIAGE_POLL_MAX_ATTEMPTS) {
-        stopTriagePolling();
-        return;
-      }
-      triagePollingRef.current = setTimeout(poll, TRIAGE_POLL_INTERVAL);
-    };
-    triagePollingRef.current = setTimeout(poll, TRIAGE_POLL_INTERVAL);
-  };
-
   useEffect(() => {
-    if (!triageLastComplete) return;
-
-    const triageData = sortTriageData({
-      success: triageLastComplete.success,
-      data: {
-        processed_count: triageLastComplete.processed_count,
-        results: triageLastComplete.results || [],
-        message: triageLastComplete.message,
-      },
-    });
-
-    setTriageResults(triageData);
-    setCachedTriageResults(null, triageData);
-    loadTriageResults(null, true);
-    startTriagePolling();
+    if (triageLastComplete) loadTriageResults(null, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triageLastComplete?.run_id]);
 
-  useEffect(() => {
-    if (!triageLastError) return;
-    setTriageResults({ success: false, error: triageLastError.error || 'Unknown error' });
-  }, [triageLastError]);
+
 
   useEffect(() => {
     if (user && user.authenticated) {
@@ -352,6 +290,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   };
 
   const handleThreadsDaysFilterChange = (days) => {
+    setThreadDays(days);
     loadEmailThreads(selectedEmail, true, false, days);
   };
 
@@ -360,12 +299,17 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
   };
 
   const handleThreadsSearchSubmit = () => {
-    loadEmailThreads(selectedEmail, true, false, emailThreads?.days || 14);
+    loadEmailThreads(selectedEmail, true, false, threadDays);
+  };
+
+  const handleSearchModeChange = (mode) => {
+    setSearchMode(mode);
+    if (threadsSearchQuery.trim()) loadEmailThreads(selectedEmail, true, false, threadDays, threadsSearchQuery, mode);
   };
 
   const handleThreadsClearSearch = () => {
     setThreadsSearchQuery('');
-    loadEmailThreads(selectedEmail, true, false, emailThreads?.days || 14, '');
+    loadEmailThreads(selectedEmail, true, false, threadDays, '');
   };
 
   const completeOnboarding = () => {
@@ -397,23 +341,21 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
     <div className="dashboard-container">
       <div className="dashboard-content workspace-dashboard">
         <div className="workspace-topline">
-          <span><WorkspaceIcon name="overview" /> Workspace <span aria-hidden="true">/</span> Overview</span>
-          <span className="workspace-connection"><i aria-hidden="true" /> {user?.emails?.length ? 'Mailboxes connected' : 'No connected mailboxes'}</span>
+          <span>Workspace</span>
+          <span className="workspace-connection">{user?.emails?.length ? 'Mailboxes connected' : 'No connected mailboxes'}</span>
         </div>
         <header className="workspace-intro">
           <div className="workspace-intro-copy">
-            <p className="workspace-eyebrow">INBOX WORKSPACE</p>
-            <h1>Inbox overview</h1>
-            <p>See what needs a reply, find related conversations, and plan your follow-ups.</p>
+            <h1>Your inbox</h1>
+            <p>Find emails, see what needs a reply, and plan your follow-ups.</p>
             <div className="workspace-intro-actions">
-              <a className="btn-primary" href="#priority-inbox"><WorkspaceIcon name="priority" /> Review priorities</a>
+              <a className="btn-primary" href="#priority-inbox"><WorkspaceIcon name="priority" /> Review follow-ups</a>
               <button type="button" className="btn-secondary" onClick={() => setShowAssistChat(true)}><WorkspaceIcon name="spark" /> Ask Copilot</button>
               <button type="button" className="workspace-quiet" onClick={() => { setShowOnboarding(true); setOnboardingStep(1); }}>Guide</button>
             </div>
           </div>
-          <InboxSignal />
           <div className="workspace-intro-summary" aria-label="Workspace status">
-            <div><WorkspaceIcon name="priority" /><strong>{checkingPending ? '…' : pendingTriageCount}</strong><span>Awaiting triage</span></div>
+            <div><WorkspaceIcon name="priority" /><strong>{checkingPending ? '…' : pendingTriageCount}</strong><span>New in recent check</span></div>
             <div><WorkspaceIcon name="mail" /><strong>{user?.emails?.length ?? 0}</strong><span>Connected mailboxes</span></div>
           </div>
         </header>
@@ -485,21 +427,23 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
             loadingThreads={loadingThreads}
             onRefreshEmails={() => loadEmailThreads(selectedEmail, true)}
             onLoadMore={() =>
-              loadEmailThreads(selectedEmail, false, true, emailThreads?.days)
+              loadEmailThreads(selectedEmail, false, true, threadDays, threadsRequest.current?.query, threadsRequest.current?.mode)
             }
             hasMore={!!emailThreadsNextPageToken}
             emailThreads={emailThreads}
             onOpenThread={handleOpenThread}
-            daysFilter={emailThreads?.days || 14}
+            daysFilter={threadDays}
             onDaysFilterChange={handleThreadsDaysFilterChange}
             searchQuery={threadsSearchQuery}
+            searchMode={searchMode}
+            onSearchModeChange={handleSearchModeChange}
             onSearchChange={handleThreadsSearchChange}
             onSearchSubmit={handleThreadsSearchSubmit}
             onClearSearch={handleThreadsClearSearch}
           />
           {showOnboarding && onboardingStep === 2 && (
             <div className="onboarding-tooltip">
-              <h3 className="onboarding-title">Conversations</h3>
+              <h3 className="onboarding-title">Inbox</h3>
               <p className="onboarding-text">
                 Browse and search your email threads by time range or keyword, and open any
                 conversation in detail.
@@ -527,6 +471,11 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
             loadingTriageResults={loadingTriageResults}
             triageResults={triageResults}
             triageProgress={triageProgress}
+          triageLastComplete={triageLastComplete}
+          triageLastError={triageLastError}
+          hasContinuation={Object.keys(getTriageCursors(user?.user_id)).length > 0}
+            reviewUnclear={reviewUnclear}
+            onReviewUnclearChange={setReviewUnclear}
             triageStatus={triageStatus}
             triageAccountInfo={triageAccountInfo}
             pendingCount={pendingTriageCount}
@@ -541,7 +490,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
           />
           {showOnboarding && onboardingStep === 3 && (
             <div className="onboarding-tooltip">
-              <h3 className="onboarding-title">Priority Inbox</h3>
+              <h3 className="onboarding-title">Needs attention</h3>
               <p className="onboarding-text">
                 Run Update Priorities to scan for important emails, then work through the
                 high‑priority list first.
@@ -565,9 +514,9 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
           }`}
         >
           <section className="card workspace-card workspace-tool-card">
-            <div><p className="workspace-eyebrow"><WorkspaceIcon name="calendar" /> FOLLOW-UPS</p><h2>Suggested schedule</h2><p>Review email follow-ups before adding them to your calendar.</p></div>
+            <div><p className="workspace-eyebrow"><WorkspaceIcon name="calendar" /> FOLLOW-UPS</p><h2>Plan follow-ups</h2><p>Review email follow-ups before adding them to your calendar.</p></div>
             <button type="button" className="btn-secondary" aria-expanded={Boolean(scheduleVisible)} onClick={() => setShowSchedule(!scheduleVisible)}>
-              {scheduleVisible ? 'Hide schedule' : 'Open schedule'}
+              {scheduleVisible ? 'Hide schedule' : 'View suggested times'}
             </button>
           </section>
           {(showSchedule !== null || scheduleVisible) && (
@@ -630,7 +579,7 @@ function Dashboard({ user, selectedEmail, onSelectEmail, onLogout }) {
       {showAssistChat !== null && (
         <div className={`thread-chat-wrapper ${showAssistChat ? 'open' : ''}`} hidden={!showAssistChat}>
           <Suspense fallback={<p className="workspace-panel-loading" role="status">Loading Copilot…</p>}>
-            <AssistChatPanel onClose={() => setShowAssistChat(false)} selectedEmail={selectedEmail} />
+            <AssistChatPanel isOpen={showAssistChat} onClose={() => setShowAssistChat(false)} selectedEmail={selectedEmail} />
           </Suspense>
         </div>
       )}

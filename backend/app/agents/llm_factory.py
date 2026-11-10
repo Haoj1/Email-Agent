@@ -98,7 +98,7 @@ def get_triage_llm() -> BaseChatModel:
     )
 
 
-def get_chat_llm() -> BaseChatModel:
+def get_chat_llm(*, max_tokens: int = 4096) -> BaseChatModel:
     """
     Get optimized LLM for Chat Agents (Thread Chat, Assist Chat)
     
@@ -108,6 +108,6 @@ def get_chat_llm() -> BaseChatModel:
     """
     return get_llm(
         temperature=0.7,  # More creative for chat
-        max_tokens=4096,  # Longer responses
+        max_tokens=max_tokens,
         provider="deepseek"
     )

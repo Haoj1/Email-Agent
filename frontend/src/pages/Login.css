@@ -130,15 +130,22 @@
 
 .login-container {
   color-scheme: dark;
-  background: radial-gradient(ellipse at 55% 2%, #183b4a, #0b1220 64%);
+  background: #111722;
 }
-.login-card { background: #121d2e; color: #edf4ff; border: 1px solid #2b4e63; border-radius: 18px; }
+.login-card { background: #171e2a; color: #edf4ff; border: 1px solid #2b4e63; border-radius: 18px; }
 .login-card h1, .info-box h3 { color: #edf4ff; }
 .login-card :is(.subtitle, .info-box li, .note, .login-footer p) { color: #aebfd6; }
 .login-card .info-box { background: #0d1728; border: 1px solid #26374d; }
-.login-card .info-box li::before, .login-footer .footer-link { color: #96f2dc; }
+.login-card .info-box li::before, .login-footer .footer-link { color: #bed0ff; }
 .login-footer { border-color: #26374d; }
 .login-card .error { background: #382432; color: #ffadba; }
 @media (max-width: 540px) {
   .login-card { padding: 24px; }
 }
+
+.App[data-theme="light"] .login-container { color-scheme: light; background: #f4f6fa; }
+.App[data-theme="light"] .login-card { background: #fff; border-color: #dce3ee; }
+.App[data-theme="light"] .login-card :is(h1, h3) { color: #1b2538; }
+.App[data-theme="light"] .login-card :is(.subtitle, .info-box li, .note, .login-footer p) { color: #53647c; }
+.App[data-theme="light"] .login-card .info-box { background: #f4f6fa; border-color: #dce3ee; }
+.App[data-theme="light"] .login-card .footer-link { color: #294c95; }

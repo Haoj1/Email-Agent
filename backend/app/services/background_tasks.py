@@ -14,6 +14,26 @@ import os
 # Track running tasks to avoid duplicate processing
 _running_tasks: Dict[str, datetime] = {}
 
+def _index_chunks(messages, service):
+    """Return at most four distinct excerpts from the three newest messages."""
+    seen = set()
+    excerpts = []
+    for message in reversed(messages[-3:]):
+        body = "\n".join(line for line in (message.get("body_text") or "").splitlines()
+                         if not line.lstrip().startswith(">"))
+        if len(body.strip()) < 10:
+            continue
+        chunks = service.chunk_text(body, chunk_size=800, overlap=60, max_chunks=2)
+        for chunk in chunks:
+            key = " ".join(chunk.split()).casefold()
+            if key and key not in seen:
+                seen.add(key)
+                excerpts.append((message["message_id"], chunk))
+                if len(excerpts) == 4:
+                    return excerpts
+    return excerpts
+
+
 async def sync_and_embed_emails(user_id: int, email: Optional[str] = None, days: int = 7, force: bool = False):
     """
     Background task to sync recent emails and generate embeddings
@@ -93,6 +113,7 @@ async def sync_and_embed_emails(user_id: int, email: Optional[str] = None, days:
                 ).distinct()
             )
             embedded_ids = set(existing)
+            await db.commit()
 
             processed_count = 0
             for thread_id in thread_ids:
@@ -100,28 +121,22 @@ async def sync_and_embed_emails(user_id: int, email: Optional[str] = None, days:
                     continue
 
                 full_thread = await asyncio.to_thread(gmail_service.get_thread_full, thread_id)
-                normalized = gmail_service.normalize_thread(full_thread)
+                normalized = gmail_service.normalize_thread(full_thread, message_limit=3)
 
                 if not normalized or not normalized.get('messages'):
                     continue
 
-                # Process each message in the thread (limit to first 3 messages per thread for speed)
-                messages_to_process = normalized['messages'][:3]
-                for msg in messages_to_process:
-                    body = msg.get('body_text', '')
-                    if not body or len(body.strip()) < 10:
-                        continue
-
-                    chunks = embedding_service.chunk_text(body, chunk_size=800, overlap=100, max_chunks=3)
-                    vectors = await asyncio.to_thread(embedding_service.get_embeddings, chunks)
-                    for chunk, vector in zip(chunks, vectors):
-                        db.add(EmailEmbedding(
-                            user_id=user_id,
-                            thread_id=thread_id,
-                            message_id=msg['message_id'],
-                            content=chunk,
-                            embedding=vector,
-                        ))
+                excerpts = _index_chunks(normalized["messages"], embedding_service)
+                if not excerpts:
+                    continue
+                vectors = await asyncio.to_thread(
+                    embedding_service.get_embeddings, [chunk for _, chunk in excerpts]
+                )
+                for (message_id, chunk), vector in zip(excerpts, vectors):
+                    db.add(EmailEmbedding(
+                        user_id=user_id, thread_id=thread_id, message_id=message_id,
+                        content=chunk, embedding=vector,
+                    ))
 
                 # Commit per thread to show progress and avoid long transactions
                 await db.commit()
