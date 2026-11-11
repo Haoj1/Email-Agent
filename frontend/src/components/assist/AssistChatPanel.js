@@ -29,7 +29,7 @@ function sourcePath(source) {
   return `/thread/${encodeURIComponent(source.thread_id)}${account}`;
 }
 
-function AssistChatPanel({ onClose, selectedEmail, isOpen, mailboxCount }) {
+function AssistChatPanel({ onClose, selectedEmail, isOpen, mailboxCount, embedded = false }) {
   const [allMailboxes, setAllMailboxes] = useState(false);
   const navigate = useNavigate();
   const [messages, setMessages] = useState([]);
@@ -409,7 +409,7 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen, mailboxCount }) {
           href={href}
           onClick={(e) => {
             e.preventDefault();
-            navigate(href);
+            navigate(href, { state: { backTo: embedded ? '/assistant' : '/dashboard' } });
           }}
           className="workspace-link"
           onMouseEnter={(e) => (e.target.style.textDecoration = 'underline')}
@@ -436,17 +436,17 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen, mailboxCount }) {
         if (event.key === 'Escape') {
           event.stopPropagation();
           if (showSessionList) setShowSessionList(false);
-          else onClose();
+          else onClose?.();
         }
       }}
-      className={`thread-chat-panel ${isMinimized ? 'minimized' : ''}`}
-      style={{ width: `${width}px` }}
+      className={`thread-chat-panel ${isMinimized ? 'minimized' : ''}${embedded ? ' assistant-embedded' : ''}`}
+      style={embedded ? undefined : { width: `${width}px` }}
     >
-      <div className="thread-chat-resizer" onMouseDown={handleMouseDown} />
+      {!embedded && <div className="thread-chat-resizer" onMouseDown={handleMouseDown} />}
       <div className="thread-chat-header">
         <div className="thread-chat-title">
           <WorkspaceIcon name="spark" className="chat-icon" />
-          <span>Inbox Copilot</span>
+          {embedded ? <h1>Inbox Copilot</h1> : <span>Inbox Copilot</span>}
         </div>
         <div className="thread-chat-actions">
           <button
@@ -462,16 +462,16 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen, mailboxCount }) {
             title="New chat" disabled={loading || loadingHistory}>
             <WorkspaceIcon name="add" />
           </button>
-          <button
+          {!embedded && <button
             className="chat-action-btn"
             onClick={() => setIsMinimized(!isMinimized)}
             title={isMinimized ? 'Expand' : 'Minimize'}
           >
             <WorkspaceIcon name="chevron" className={isMinimized ? 'workspace-rotated' : ''} />
-          </button>
-          <button className="chat-action-btn" onClick={onClose} title="Close">
+          </button>}
+          {!embedded && <button className="chat-action-btn" onClick={onClose} title="Close">
             <WorkspaceIcon name="close" />
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -546,7 +546,8 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen, mailboxCount }) {
                         {msg.sources?.length > 0 && (
                           <div className="workspace-copilot-sources" aria-label="Source conversations">
                             {msg.sources.map(source => (
-                              <Link to={sourcePath(source)} key={sourcePath(source)}>
+                              <Link to={sourcePath(source)} key={sourcePath(source)}
+                                state={{ backTo: embedded ? '/assistant' : '/dashboard' }}>
                                 <WorkspaceIcon name="link" /> {source.subject || source.thread_id}
                               </Link>
                             ))}

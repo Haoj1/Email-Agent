@@ -201,7 +201,7 @@ class GmailService:
             return next((h['value'] for h in headers if h['name'] == name), '')
         
         # Extract body
-        body_text, body_html = self._extract_body(message_data.get('payload', {}))
+        body_text, body_html = self.extract_body(message_data.get('payload', {}))
         
         # Parse date
         date_str = get_header('Date')
@@ -220,7 +220,8 @@ class GmailService:
             'labels': message_data.get('labelIds', [])
         }
     
-    def _extract_body(self, payload: Dict) -> Tuple[str, Optional[str]]:
+    @staticmethod
+    def extract_body(payload: Dict) -> Tuple[str, Optional[str]]:
         """Extract text and HTML body from message payload"""
         body_text = ""
         body_html = None
@@ -228,11 +229,22 @@ class GmailService:
         def extract_from_part(part: Dict):
             nonlocal body_text, body_html
             mime_type = part.get('mimeType', '')
+            if part.get('filename') or mime_type == 'message/rfc822':
+                return
             body_data = part.get('body', {}).get('data', '')
-            
-            if body_data:
+
+            if body_data and mime_type in ('text/plain', 'text/html'):
                 try:
-                    decoded = base64.urlsafe_b64decode(body_data).decode('utf-8', errors='ignore')
+                    raw = base64.urlsafe_b64decode(body_data + '=' * (-len(body_data) % 4))
+                    content_type = next(
+                        (header['value'] for header in part.get('headers', [])
+                         if header.get('name', '').lower() == 'content-type'), ''
+                    )
+                    charset = re.search(r'charset\s*=\s*["\']?([\w.-]+)', content_type, re.I)
+                    try:
+                        decoded = raw.decode(charset[1] if charset else 'utf-8', errors='replace')
+                    except LookupError:
+                        decoded = raw.decode('utf-8', errors='replace')
                     if mime_type == 'text/plain' and not body_text:
                         body_text = decoded
                     elif mime_type == 'text/html' and not body_html:
@@ -245,12 +257,7 @@ class GmailService:
                 for subpart in part.get('parts', []):
                     extract_from_part(subpart)
         
-        if 'parts' in payload:
-            for part in payload['parts']:
-                extract_from_part(part)
-        else:
-            # Single part message
-            extract_from_part(payload)
+        extract_from_part(payload)
         
         return body_text, body_html
     

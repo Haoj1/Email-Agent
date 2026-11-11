@@ -6,13 +6,15 @@ from difflib import SequenceMatcher
 from email.utils import parseaddr
 
 
-def summarize_threads(service, query: str, max_results: int) -> list[dict]:
+def summarize_threads(service, query: str, max_results: int, *, hide_promotions=False) -> list[dict]:
     results = []
     for thread in service.get_threads(max_results=max_results, query=query):
         messages = thread.get("messages", [])
         if not messages:
             continue
         latest = messages[-1]
+        if hide_promotions and "CATEGORY_PROMOTIONS" in latest.get("labelIds", []):
+            continue
         headers = {
             header["name"].lower(): header.get("value", "")
             for header in latest.get("payload", {}).get("headers", [])
@@ -88,7 +90,10 @@ def rank_fuzzy_threads(threads: list[dict], query: str, limit: int) -> list[dict
     return [thread for _, thread in sorted(ranked, key=lambda entry: -entry[0])[:limit]]
 
 
-def fuzzy_search(service, query: str, days=14, limit=12):
+def fuzzy_search(service, query: str, days=14, limit=12, *, category_query=None, hide_promotions=False):
     days = max(1, min(days, 30))
-    candidates = summarize_threads(service, f"newer_than:{days}d", 30)
+    query_filter = f"newer_than:{days}d"
+    if category_query:
+        query_filter += f" {category_query}"
+    candidates = summarize_threads(service, query_filter, 30, hide_promotions=hide_promotions)
     return rank_fuzzy_threads(candidates, query, max(1, min(limit, 12))), len(candidates)

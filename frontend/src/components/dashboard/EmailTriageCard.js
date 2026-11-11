@@ -2,6 +2,12 @@ import React from 'react';
 import WorkspaceIcon from '../workspace/WorkspaceIcon';
 import { Link, useLocation } from 'react-router-dom';
 
+export function PriorityBadge({ priority }) {
+  const score = Math.round((priority || 0) * 100);
+  const tone = score >= 80 ? 'high' : score >= 50 ? 'medium' : 'low';
+  return <span className={`priority-badge priority-${tone}`}>{tone[0].toUpperCase() + tone.slice(1)} priority</span>;
+}
+
 export default function EmailTriageCard({
   runningTriage, loadingTriageResults, triageResults, triageProgress, triageStatus,
   triageAccountInfo, triageLastComplete, triageLastError, hasMailboxes, reviewUnclear, onReviewUnclearChange,
@@ -62,11 +68,10 @@ export default function EmailTriageCard({
       {triageResults?.success && !results.length && <p className="workspace-empty">{runningTriage ? 'Checking your mailbox. Summaries will appear here.' : 'Nothing to review in this date range.'}</p>}
       <ul className="priority-list">
         {results.map((result, index) => {
-          const score = Math.round((result.priority || 0) * 100);
           return (
             <li key={result.id || `${result.email || ''}-${result.thread_id}-${index}`}>
               <article className="priority-item">
-                <div className="priority-badges"><span className={score >= 80 ? 'priority-tag urgent' : 'priority-tag'}>{({ NEEDS_REPLY: 'Needs reply', FYI: 'FYI', ARCHIVE: 'Archive', SPAM_LIKE: 'Likely spam', REVIEW: 'Review' })[result.label] || result.label || 'Review'}</span><span>{score >= 80 ? 'High priority' : score >= 50 ? 'Medium priority' : 'Low priority'}</span></div>
+                <div className="priority-badges"><PriorityBadge priority={result.priority} /><span>{({ NEEDS_REPLY: 'Needs reply', FYI: 'FYI', ARCHIVE: 'Archive', SPAM_LIKE: 'Likely spam', REVIEW: 'Review' })[result.label] || result.label || 'Review'}</span></div>
                 <button type="button" className="priority-open" disabled={!result.thread_id} onClick={() => onOpenThread(result.thread_id, result.email)}>
                   {result.subject || result.summary || 'Open conversation'} <WorkspaceIcon name="arrow" />
                 </button>

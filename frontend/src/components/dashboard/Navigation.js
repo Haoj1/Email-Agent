@@ -1,18 +1,21 @@
 import React from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import WorkspaceIcon from '../workspace/WorkspaceIcon';
+import MailboxMenu from './MailboxMenu';
 
 const pages = [
   { path: '/dashboard', icon: 'overview', label: 'Home' },
   { path: '/threads', icon: 'mail', label: 'Inbox' },
   { path: '/triage', icon: 'priority', label: 'Needs attention' },
   { path: '/follow-ups', icon: 'followup', label: 'Follow-ups' },
+  { path: '/calendar', icon: 'calendar', label: 'Calendar' },
+  { path: '/assistant', icon: 'spark', label: 'Assistant' },
 ];
 
-export default function Navigation({ user, selectedEmail, onSelectEmail, onLogout, onTabIntent, theme, onToggleTheme }) {
+export default function Navigation({ user, selectedEmail, onSelectEmail, onDisconnect, onLogout, onTabIntent, theme, onToggleTheme }) {
   const accounts = user?.emails || [];
   const current = accounts.find(account => account.email === selectedEmail)?.email
-    || user?.primary_email || accounts[0]?.email || user?.email || '';
+    || user?.primary_email || accounts[0]?.email || '';
 
   return (
     <aside className="workspace-sidebar">
@@ -28,24 +31,8 @@ export default function Navigation({ user, selectedEmail, onSelectEmail, onLogou
           </NavLink>
         ))}
       </nav>
-      <div className="workspace-profile">
-        {accounts.length > 1 ? (
-          <label className="workspace-account-label">
-            <span>MAILBOX</span>
-            <select value={current} onChange={event => onSelectEmail(event.target.value)}>
-              {accounts.map(account => (
-                <option key={account.id} value={account.email}>{account.email}</option>
-              ))}
-            </select>
-          </label>
-        ) : current && <span className="workspace-account-single" title={current}>{current}</span>}
-        <button type="button" className="workspace-theme" onClick={onToggleTheme}
-          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
-          <WorkspaceIcon name={theme === 'dark' ? 'sun' : 'moon'} />
-          <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
-        </button>
-        <button type="button" className="workspace-logout" onClick={onLogout}><WorkspaceIcon name="logout" /> Sign out</button>
-      </div>
+      <MailboxMenu user={user} current={current} onSelectEmail={onSelectEmail} onDisconnect={onDisconnect}
+        theme={theme} onToggleTheme={onToggleTheme} onLogout={onLogout} />
     </aside>
   );
 }

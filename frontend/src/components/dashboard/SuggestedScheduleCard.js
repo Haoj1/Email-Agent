@@ -83,6 +83,13 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
     loadSuggestions();
   }, [loadSuggestions]);
 
+  useEffect(() => {
+    const layout = window.matchMedia('(max-width: 660px)');
+    const changeView = event => calendarRef.current?.getApi().changeView(event.matches ? 'timeGridDay' : 'timeGridWeek');
+    layout.addEventListener('change', changeView);
+    return () => layout.removeEventListener('change', changeView);
+  }, []);
+
   const selectedSuggestions = useMemo(() => {
     return suggestions.filter((s) => selectedKeys.has(suggestionKey(s)));
   }, [suggestions, selectedKeys]);
@@ -179,31 +186,33 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
 
   return (
     <div className="card" style={{ width: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px' }}>
+      <div className="calendar-toolbar">
         <div>
-          <h2 style={{ marginBottom: '6px' }}>Suggested Schedule</h2>
+          <h2 style={{ marginBottom: '6px' }}>Suggested schedule</h2>
           <p style={{ margin: 0, fontSize: '0.9em', color: 'var(--muted, #666)' }}>
-            Auto-plans follow‑ups from your Priority Inbox into open time on your calendar. Review first, then confirm.
+            Review suggested time slots for follow-ups before adding them to your calendar.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <button className="btn-secondary" onClick={loadSuggestions} disabled={loading || confirming}>
-            {loading ? 'Generating…' : 'Regenerate'}
+            {loading ? 'Loading…' : 'Refresh suggestions'}
           </button>
           <button
             className="btn-primary"
             onClick={handleConfirm}
             disabled={confirming || loading || selectedSuggestions.length === 0}
           >
-            {confirming ? 'Creating…' : `Confirm & Create (${selectedSuggestions.length})`}
+            {confirming ? 'Creating…' : `Add to calendar (${selectedSuggestions.length})`}
           </button>
         </div>
       </div>
 
       <div style={{ marginTop: '14px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <label style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>Schedule:</label>
+        <div className="calendar-filters">
+          <div className="calendar-filter">
+          <label htmlFor="calendar-range" style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>Schedule</label>
           <select
+            id="calendar-range"
             value={days}
             onChange={(e) => setDays(parseInt(e.target.value))}
             disabled={loading || confirming}
@@ -215,16 +224,18 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
               fontSize: '14px',
               backgroundColor: 'var(--panel, #fff)',
               color: 'var(--ink, #333)',
-              outline: 'none',
             }}
           >
             <option value={3}>Next 3 days</option>
             <option value={7}>Next 7 days</option>
             <option value={14}>Next 2 weeks</option>
           </select>
+          </div>
 
-          <label style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>From Priority Inbox:</label>
+          <div className="calendar-filter">
+          <label htmlFor="calendar-mail-range" style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>Recent mail</label>
           <select
+            id="calendar-mail-range"
             value={triageDays}
             onChange={(e) => setTriageDays(parseInt(e.target.value))}
             disabled={loading || confirming}
@@ -236,16 +247,18 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
               fontSize: '14px',
               backgroundColor: 'var(--panel, #fff)',
               color: 'var(--ink, #333)',
-              outline: 'none',
             }}
           >
             <option value={1}>Today</option>
             <option value={3}>Last 3 Days</option>
             <option value={7}>Last Week</option>
           </select>
+          </div>
 
-          <label style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>Max items:</label>
+          <div className="calendar-filter">
+          <label htmlFor="calendar-limit" style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>Max items</label>
           <select
+            id="calendar-limit"
             value={maxItems}
             onChange={(e) => setMaxItems(parseInt(e.target.value))}
             disabled={loading || confirming}
@@ -257,13 +270,13 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
               fontSize: '14px',
               backgroundColor: 'var(--panel, #fff)',
               color: 'var(--ink, #333)',
-              outline: 'none',
             }}
           >
             <option value={10}>10</option>
             <option value={15}>15</option>
             <option value={20}>20</option>
           </select>
+          </div>
 
           <button className="btn-secondary" onClick={selectAll} disabled={loading || confirming || suggestions.length === 0}>
             Select all
@@ -274,7 +287,7 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
         </div>
 
         <div style={{ marginLeft: 'auto', fontSize: '0.85em', color: 'var(--muted, #666)' }}>
-          Avoiding <strong>{busyCount}</strong> existing calendar event(s)
+          <strong>{busyCount}</strong> existing calendar {busyCount === 1 ? 'event' : 'events'}
         </div>
       </div>
 
@@ -307,18 +320,18 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
 
         {!loading && suggestions.length === 0 && !error && (
           <div style={{ padding: '16px', backgroundColor: 'var(--surface, #f5f5f5)', borderRadius: '4px', color: 'var(--muted, #666)' }}>
-            No suggested follow‑ups found for the selected range. Try expanding the time range or increasing Priority Inbox lookback.
+            No follow-up suggestions for this date range.
           </div>
         )}
 
-        {!loading && suggestions.length > 0 && (
+        {!loading && !error && (
           <>
-            <div style={{ border: '1px solid var(--line, #eee)', borderRadius: '10px', overflow: 'hidden', background: 'var(--panel, #fff)' }}>
+            <div className="calendar-grid">
               <FullCalendar
                 ref={calendarRef}
                 plugins={[timeGridPlugin, interactionPlugin]}
-                initialView="timeGridWeek"
-                height={680}
+                initialView={window.matchMedia('(max-width: 660px)').matches ? 'timeGridDay' : 'timeGridWeek'}
+                height={590}
                 nowIndicator={true}
                 editable={true}
                 eventStartEditable={true}
@@ -383,7 +396,7 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
               />
             </div>
 
-            <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+            {suggestions.length > 0 && <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
               <div style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>
                 Tip: click a block to select/deselect. Drag to move. Resize to change duration.
               </div>
@@ -401,7 +414,7 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
                   <span style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>Busy</span>
                 </div>
               </div>
-            </div>
+            </div>}
 
             {selectedSuggestions.length > 0 && (
               <div style={{ marginTop: '12px' }}>
@@ -425,7 +438,7 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
                             onClick={() => {
                               const params = new URLSearchParams();
                               if (selectedEmail) params.set('email', selectedEmail);
-                              navigate(`/thread/${s.thread_id}?${params.toString()}`);
+                              navigate(`/thread/${s.thread_id}?${params.toString()}`, { state: { backTo: '/calendar' } });
                             }}
                             style={{ padding: '4px 10px', fontSize: 12 }}
                           >

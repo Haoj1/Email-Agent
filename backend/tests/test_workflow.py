@@ -243,6 +243,15 @@ class WorkflowTest(IsolatedAsyncioTestCase):
                           if line.startswith("data: ")]
                 self.assertEqual(events[-1]["type"], "result", events)
                 self.assertTrue(events[-1]["used_web_search"])
+            self.assertEqual((await client.delete(f"/api/emails/{outside.id}")).status_code, 404)
+            disconnected = await client.delete(f"/api/emails/{second.id}")
+            self.assertEqual(disconnected.status_code, 200)
+            self.assertEqual([account["email"] for account in disconnected.json()["emails"]], [PRIMARY])
+            self.assertEqual((await client.delete(f"/api/emails/{first.id}")).status_code, 400)
+            async with AsyncSessionLocal() as db:
+                self.assertIsNone(await db.get(UserEmail, second.id))
+                self.assertEqual(await db.scalar(select(func.count()).select_from(OAuthToken)
+                                                 .where(OAuthToken.user_email_id == second.id)), 0)
             self.assertEqual((await client.post("/api/auth/logout")).status_code, 200)
             client.cookies.set("session_id", SECRET)
             self.assertEqual((await client.get("/api/auth/me")).status_code, 401)
