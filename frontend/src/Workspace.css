@@ -133,6 +133,7 @@
 .workspace-quiet:hover { text-decoration: underline; }
 .workspace-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .conversation-list, .priority-list { list-style: none; border-top: 1px solid var(--line); max-height: 520px; overflow-y: auto; }
+.priority-list { overflow-x: hidden; scrollbar-gutter: stable; }
 .conversation-list:empty, .priority-list:empty { display: none; }
 .conversation-list li + li, .priority-list > li + li { border-top: 1px solid var(--line); }
 .conversation-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 10px; align-items: start; width: 100%; text-align: left; color: inherit; background: var(--panel); border: 0; padding: 12px 18px; cursor: pointer; }
@@ -155,7 +156,7 @@
 .priority-item-footer { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .priority-review-action { margin-left: auto; display: inline-flex; gap: 7px; align-items: center; min-height: 28px; color: var(--accent-dark); font-size: 12px; font-weight: 650; cursor: pointer; }
 .priority-review-action input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); cursor: inherit; }
-.priority-review-action:has(input:disabled) { opacity: .65; cursor: default; }
+.priority-review-action:has(input:disabled) { cursor: default; }
 .priority-item { padding: 12px 18px; display: grid; gap: 5px; }
 .priority-badges { display: flex; gap: 7px; align-items: center; color: var(--muted); font-size: 10px; }
 .priority-tag { border-radius: 6px; background: var(--soft); color: var(--accent-dark); padding: 3px 7px; text-transform: capitalize; font-size: 10px; font-weight: 720; }
