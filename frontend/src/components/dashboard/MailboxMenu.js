@@ -70,7 +70,7 @@ export default function MailboxMenu({
             </li>
           ))}
         </ul>
-        {accounts.length === 1 && <p className="mailbox-help">Add another mailbox to disconnect this one.</p>}
+        {accounts.length === 1 && <p className="mailbox-help">Keep multiple Gmail mailboxes connected and switch between them here.</p>}
         {disconnecting && <div className="mailbox-confirm">
           <p>Disconnect <strong>{disconnecting.email}</strong> from Email Agent? Its saved follow-ups will be removed here. You can reconnect the Gmail mailbox later.</p>
           <button type="button" className="btn-secondary" disabled={busy} onClick={() => setDisconnecting(null)}>Cancel</button>
@@ -81,7 +81,7 @@ export default function MailboxMenu({
         {error && <p className="workspace-error" role="alert">{error}</p>}
         <div className="mailbox-dialog-actions">
           <button type="button" className="btn-primary" disabled={busy} onClick={addMailbox}>
-            <WorkspaceIcon name="add" /> {busy && !disconnecting ? 'Opening Google…' : 'Add account'}
+            <WorkspaceIcon name="add" /> {busy && !disconnecting ? 'Opening Google…' : 'Add mailbox'}
           </button>
           <button type="button" className="workspace-theme" onClick={onToggleTheme}>
             <WorkspaceIcon name={theme === 'dark' ? 'sun' : 'moon'} /> {theme === 'dark' ? 'Light mode' : 'Dark mode'}
