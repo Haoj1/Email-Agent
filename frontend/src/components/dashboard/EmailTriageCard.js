@@ -99,10 +99,11 @@ export default function EmailTriageCard({
         {triageLastComplete.hasMore && ' · continuing automatically'}
         {triageLastComplete.aiUnavailable && ' · AI was unavailable, basic checks still completed'}
       </p>}
-      {loadingTriageResults && !runningTriage && <p className="workspace-empty" role="status">Loading priorities…</p>}
+      {loadingTriageResults && !runningTriage && !triageResults?.success
+        && <p className="workspace-empty" role="status">Loading priorities…</p>}
       {triageResults?.success === false && <p className="workspace-error" role="alert">{triageResults.error}</p>}
-      {reviewMessage && <p className={reviewMessage.error ? 'workspace-error' : 'workspace-search-hint'}
-        role={reviewMessage.error ? 'alert' : 'status'}>{reviewMessage.text}</p>}
+      <p className="workspace-sr-only" role="status">{!reviewMessage?.error ? reviewMessage?.text : ''}</p>
+      {reviewMessage?.error && <p className="workspace-error" role="alert">{reviewMessage.text}</p>}
       {triageResults?.success && !results.length && <p className="workspace-empty">
         {reviewStatus === 'reviewed' ? 'No reviewed conversations in this date range.'
           : runningTriage ? 'Checking your mailbox. Summaries will appear here.' : 'Nothing to review in this date range.'}
@@ -124,7 +125,7 @@ export default function EmailTriageCard({
                     <input type="checkbox"
                       checked={reviewingId === result.id ? !isReviewed : isReviewed}
                       disabled={reviewBusy || loadingTriageResults}
-                      onChange={event => onSetReviewed(result, event.target.checked)} />
+                      onChange={event => onSetReviewed(result, event.target.checked, event.target.closest('li'))} />
                     <span>{isReviewed ? 'Reviewed' : 'Mark as reviewed'}</span>
                   </label>}
                 </div>

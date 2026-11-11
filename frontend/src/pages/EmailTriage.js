@@ -5,6 +5,19 @@ import { api } from '../services/api';
 import EmailTriageCard from '../components/dashboard/EmailTriageCard';
 import './Dashboard.css';
 
+async function animateReviewExit(row) {
+  if (!row?.isConnected || !row.animate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  try {
+    const animation = row.animate([
+      { height: `${row.getBoundingClientRect().height}px`, opacity: 1, transform: 'translateX(0)', overflow: 'hidden' },
+      { height: '0px', opacity: 0, transform: 'translateX(16px)', overflow: 'hidden' },
+    ], { duration: 220, easing: 'cubic-bezier(.22,.7,.3,1)', fill: 'forwards' });
+    await animation.finished;
+  } catch {
+    // A cancelled animation must not prevent a saved review from leaving the list.
+  }
+}
+
 function EmailTriagePage({ user, selectedEmail, onAiReviewChange }) {
   const { 
     triageRunning,
@@ -25,6 +38,7 @@ function EmailTriagePage({ user, selectedEmail, onAiReviewChange }) {
   const [reviewingId, setReviewingId] = useState(null);
   const [reviewMessage, setReviewMessage] = useState(null);
   const requestRef = useRef(null);
+  const lastRefreshRun = useRef(null);
   const pageSize = 20;
   const navigate = useNavigate();
 
@@ -95,7 +109,9 @@ function EmailTriagePage({ user, selectedEmail, onAiReviewChange }) {
     loadTriageResults({ status });
   };
 
-  const setReviewed = async (item, reviewed) => {
+  const setReviewed = async (item, reviewed, row) => {
+    requestRef.current?.abort();
+    setLoadingTriageResults(false);
     setReviewingId(item.id);
     setReviewMessage(null);
     try {
@@ -103,15 +119,16 @@ function EmailTriagePage({ user, selectedEmail, onAiReviewChange }) {
         reviewed, email: item.email ?? null, last_inbound_at_ms: item.last_inbound_at_ms,
       });
       setCachedTriageResults(null, null);
+      await animateReviewExit(row);
       setTriageResults(current => current?.data ? {
         ...current,
         data: { ...current.data,
           results: current.data.results.filter(result => result.id !== item.id),
+          count: Math.max(0, current.data.count - 1),
           total_count: Math.max(0, current.data.total_count - 1),
         },
       } : current);
       setReviewMessage({ text: reviewed ? 'Marked as reviewed.' : 'Moved back to To review.' });
-      await loadTriageResults({ refresh: true, preserve: true });
     } catch (error) {
       const changed = error.response?.status === 409;
       setReviewMessage({ error: true, text: changed
@@ -124,12 +141,15 @@ function EmailTriagePage({ user, selectedEmail, onAiReviewChange }) {
   };
 
   useEffect(() => {
-    if ((triageLastComplete?.processed_count || triageLastComplete?.serverSync)
-      && (triageResults?.data?.results?.length || 0) <= pageSize && !reviewingId) {
+    const runId = triageLastComplete?.run_id;
+    if (reviewingId || runId === lastRefreshRun.current
+      || !(triageLastComplete?.processed_count || triageLastComplete?.serverSync)) return;
+    lastRefreshRun.current = runId;
+    if ((triageResults?.data?.results?.length || 0) <= pageSize) {
       loadTriageResults({ refresh: true, preserve: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [triageLastComplete?.run_id]);
+  }, [triageLastComplete?.run_id, reviewingId]);
 
   return (
     <div className="dashboard-container">
