@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { useEmailCache } from '../contexts/EmailCacheContext';
 import { api } from '../services/api';
@@ -19,12 +19,13 @@ function EmailTriagePage({ user, selectedEmail, onAiReviewChange }) {
   const { getCachedTriageResults, setCachedTriageResults, getReturnView, rememberReturnView } = useEmailCache();
   const [restored] = useState(() => navigationType === 'POP' ? getReturnView(location.key) : null);
   const [triageResults, setTriageResults] = useState(restored?.results || null);
-  const [triagePage, setTriagePage] = useState(restored?.page || 0);
-  const TRIAGE_PAGE_SIZE = 20;
-  const [loadingTriageResults, setLoadingTriageResults] = useState(false);
-  // Default to last 3 days for better signal-to-noise
+  const [reviewStatus, setReviewStatus] = useState(restored?.reviewStatus || 'pending');
   const [triageDaysFilter, setTriageDaysFilter] = useState(restored ? restored.days : 3);
-  
+  const [loadingTriageResults, setLoadingTriageResults] = useState(false);
+  const [reviewingId, setReviewingId] = useState(null);
+  const [reviewMessage, setReviewMessage] = useState(null);
+  const requestRef = useRef(null);
+  const pageSize = 20;
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -32,86 +33,104 @@ function EmailTriagePage({ user, selectedEmail, onAiReviewChange }) {
       const frame = requestAnimationFrame(() => window.scrollTo(0, restored.scroll));
       return () => cancelAnimationFrame(frame);
     }
-    if (user?.authenticated) loadTriageResults(null, false);
+    if (user?.authenticated) loadTriageResults();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  const sortTriageData = (triageData) => {
-    if (!triageData?.success || !Array.isArray(triageData.data?.results)) return triageData;
-    return {
-      ...triageData,
-      data: {
-        ...triageData.data,
-        results: [...triageData.data.results].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)),
-      },
-    };
-  };
+  useEffect(() => () => requestRef.current?.abort(), []);
 
-  const loadTriageResults = async (label = null, forceRefresh = false, returnData = false, isLoadMore = false, days = triageDaysFilter, preserve = false) => {
-    if (!forceRefresh && !label && !isLoadMore) {
+  const loadTriageResults = async ({
+    refresh = false, more = false, days = triageDaysFilter, status = reviewStatus, preserve = false,
+  } = {}) => {
+    requestRef.current?.abort();
+    if (!refresh && !more) {
       const cached = getCachedTriageResults(null);
-      if (cached?.days === days) {
+      if (cached?.days === days && cached.reviewStatus === status) {
         setTriageResults(cached);
-        return returnData ? cached : undefined;
+        setLoadingTriageResults(false);
+        return;
       }
     }
 
+    const controller = new AbortController();
+    requestRef.current = controller;
     setLoadingTriageResults(true);
-    if (forceRefresh && !isLoadMore) {
-      if (!preserve) setTriageResults(null);
-      setTriagePage(0);
-    }
-    
-    const currentPage = isLoadMore ? triagePage + 1 : 0;
-    
-    try {
-      const params = { limit: TRIAGE_PAGE_SIZE, skip: currentPage * TRIAGE_PAGE_SIZE };
-      if (label) params.label = label;
-      if (days) params.days = days;
+    if (!more && !preserve) setTriageResults(null);
+    const previous = more ? triageResults?.data?.results || [] : [];
+    const params = { limit: pageSize, skip: previous.length, review_status: status };
+    if (days) params.days = days;
 
-      const response = await api.get('/triage/results', { params });
-      const newData = response.data;
-      let mergedResults = newData.results || [];
-      if (isLoadMore && triageResults?.data?.results) {
-        mergedResults = [...triageResults.data.results, ...mergedResults];
-      }
-      
-      const triageData = sortTriageData({ 
-        success: true,
-        days,
-        data: { ...newData, results: mergedResults, count: mergedResults.length }
-      });
-      
-      setTriageResults(triageData);
-      setTriagePage(isLoadMore ? currentPage : 0);
-      if (!label && !isLoadMore) setCachedTriageResults(null, triageData);
+    try {
+      const { data } = await api.get('/triage/results', { params, signal: controller.signal });
+      if (controller.signal.aborted) return;
+      const results = [...previous, ...(data.results || [])];
+      const next = { success: true, days, reviewStatus: status, data: { ...data, results, count: results.length } };
+      setTriageResults(next);
+      if (!more) setCachedTriageResults(null, next);
     } catch (error) {
-      if (!preserve) setTriageResults({ success: false, error: error.message });
+      if (!controller.signal.aborted && !preserve) {
+        setTriageResults({ success: false, error: error.message });
+      }
     } finally {
-      setLoadingTriageResults(false);
+      if (!controller.signal.aborted) setLoadingTriageResults(false);
     }
   };
 
   const handleOpenThread = (threadId, account = selectedEmail) => {
     const params = new URLSearchParams();
     if (account) params.set('email', account);
-    rememberReturnView(location.key, { results: triageResults, page: triagePage, days: triageDaysFilter });
+    rememberReturnView(location.key, { results: triageResults, reviewStatus, days: triageDaysFilter });
     navigate(`/thread/${threadId}?${params.toString()}`, { state: { backTo: location.pathname } });
   };
 
-  const handleDaysFilterChange = (days) => {
+  const changeDays = days => {
     setTriageDaysFilter(days);
-    loadTriageResults(null, true, false, false, days);
+    loadTriageResults({ days });
+  };
+
+  const changeStatus = status => {
+    if (status === reviewStatus) return;
+    setReviewStatus(status);
+    setReviewMessage(null);
+    loadTriageResults({ status });
+  };
+
+  const setReviewed = async item => {
+    const reviewed = reviewStatus === 'pending';
+    setReviewingId(item.id);
+    setReviewMessage(null);
+    try {
+      await api.patch(`/triage/results/${item.id}/review`, {
+        reviewed, email: item.email ?? null, last_inbound_at_ms: item.last_inbound_at_ms,
+      });
+      setCachedTriageResults(null, null);
+      setTriageResults(current => current?.data ? {
+        ...current,
+        data: { ...current.data,
+          results: current.data.results.filter(result => result.id !== item.id),
+          total_count: Math.max(0, current.data.total_count - 1),
+        },
+      } : current);
+      setReviewMessage({ text: reviewed ? 'Marked as reviewed.' : 'Moved back to To review.' });
+      await loadTriageResults({ refresh: true, preserve: true });
+    } catch (error) {
+      const changed = error.response?.status === 409;
+      setReviewMessage({ error: true, text: changed
+        ? 'This conversation has changed. Check the latest version.'
+        : 'Could not update the review status. Try again.' });
+      if (changed) await loadTriageResults({ refresh: true, preserve: true });
+    } finally {
+      setReviewingId(null);
+    }
   };
 
   useEffect(() => {
-    if ((triageLastComplete?.processed_count || triageLastComplete?.serverSync) && triagePage === 0) {
-      loadTriageResults(null, true, false, false, triageDaysFilter, true);
+    if ((triageLastComplete?.processed_count || triageLastComplete?.serverSync)
+      && (triageResults?.data?.results?.length || 0) <= pageSize && !reviewingId) {
+      loadTriageResults({ refresh: true, preserve: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triageLastComplete?.run_id]);
-
-
 
   return (
     <div className="dashboard-container">
@@ -129,8 +148,13 @@ function EmailTriagePage({ user, selectedEmail, onAiReviewChange }) {
           triageStatus={triageStatus}
           triageAccountInfo={triageAccountInfo}
           daysFilter={triageDaysFilter}
-          onDaysFilterChange={handleDaysFilterChange}
-          onLoadMore={() => loadTriageResults(null, false, false, true)}
+          onDaysFilterChange={changeDays}
+          reviewStatus={reviewStatus}
+          onReviewStatusChange={changeStatus}
+          reviewingId={reviewingId}
+          reviewMessage={reviewMessage}
+          onSetReviewed={setReviewed}
+          onLoadMore={() => loadTriageResults({ more: true })}
           onOpenThread={handleOpenThread}
         />
       </div>

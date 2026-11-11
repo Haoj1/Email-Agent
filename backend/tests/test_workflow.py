@@ -63,7 +63,9 @@ class WorkflowTest(IsolatedAsyncioTestCase):
         async with engine.begin() as connection:
             await connection.execute(text("DROP TABLE login_sessions, follow_ups, mailbox_sync_state, mailbox_thread_index"))
             await connection.execute(text("ALTER TABLE email_embeddings DROP COLUMN user_email_id"))
-            await connection.execute(text("ALTER TABLE triage_results DROP COLUMN ai_reviewed, DROP COLUMN ai_reviewed_through_ms"))
+            await connection.execute(text("ALTER TABLE triage_results DROP COLUMN ai_reviewed, "
+                                          "DROP COLUMN ai_reviewed_through_ms, DROP COLUMN reviewed_at, "
+                                          "DROP COLUMN last_inbound_at_ms"))
             await connection.execute(text("ALTER TABLE users DROP COLUMN ai_review_mode, DROP COLUMN ai_review_since"))
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             self.assertEqual((await client.get("/api/ready")).status_code, 503)
@@ -289,6 +291,46 @@ class WorkflowTest(IsolatedAsyncioTestCase):
                     threads[PRIMARY]["messages"].append(message("off-primary", since + 6, senders[PRIMARY], "New email"))
                     self.assertEqual((await scan())["ai_calls"], 0)
                     self.assertEqual((await client.get("/api/auth/me")).json()["ai_review_mode"], "off")
+
+                async def triage_list(status, **filters):
+                    response = await client.get("/api/triage/results",
+                                                params={"email": PRIMARY, "review_status": status, **filters})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    return response.json()
+
+                pending = await triage_list("pending")
+                self.assertEqual(pending["total_count"], 1)
+                item = pending["results"][0]
+                review_path = f"/api/triage/results/{item['id']}/review"
+                review_data = {"reviewed": True, "email": PRIMARY,
+                               "last_inbound_at_ms": item["last_inbound_at_ms"]}
+                client.cookies.set("session_id", "other-session")
+                self.assertEqual((await client.patch(review_path, json=review_data)).status_code, 404)
+                client.cookies.set("session_id", "next-session")
+                marked = await client.patch(review_path, json=review_data)
+                self.assertEqual(marked.status_code, 200, marked.text)
+                self.assertEqual((await triage_list("pending"))["total_count"], 0)
+                reviewed_result = (await triage_list("reviewed", days=3))["results"][0]
+                self.assertEqual(reviewed_result["reviewed_at"], marked.json()["reviewed_at"])
+                self.assertEqual(reviewed_result["updated_at"], item["updated_at"])
+                undo = await client.patch(review_path, json={**review_data, "reviewed": False})
+                self.assertEqual(undo.json(), {"reviewed_at": None})
+                self.assertEqual((await triage_list("pending"))["total_count"], 1)
+                self.assertEqual((await client.patch(review_path, json=review_data)).status_code, 200)
+
+                # Sending a reply leaves the review status intact. A new inbound reply reopens the item.
+                threads[PRIMARY]["messages"].append(message("sent-after-review", since + 7, PRIMARY, "Sent", ["SENT"]))
+                await tick(first)
+                self.assertEqual((await triage_list("reviewed"))["total_count"], 1)
+                async with AsyncSessionLocal() as db:
+                    await db.execute(text("UPDATE triage_results SET created_at = now() - interval '10 days' "
+                                          "WHERE id = :id"), {"id": item["id"]})
+                    await db.commit()
+                threads[PRIMARY]["messages"].append(message("inbound-after-review", since + 8, senders[PRIMARY], "New reply"))
+                await tick(first)
+                self.assertEqual((await triage_list("reviewed"))["total_count"], 0)
+                self.assertEqual((await triage_list("pending", days=3))["total_count"], 1)
+                self.assertEqual((await client.patch(review_path, json=review_data)).status_code, 409)
 
                 history[PRIMARY] = None
                 await tick(first)

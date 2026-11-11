@@ -4,8 +4,8 @@ Triage API routes - Email classification and prioritization
 from fastapi import APIRouter, HTTPException, Depends, Request, Body, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional, List, AsyncGenerator
-from pydantic import BaseModel, Field
+from typing import Optional, List, AsyncGenerator, Literal
+from pydantic import BaseModel, Field, StrictBool
 from googleapiclient.errors import HttpError
 from datetime import datetime, timedelta, timezone
 import json
@@ -15,11 +15,11 @@ from app.config import settings
 from app.database import get_db
 from app.routes.auth import get_user_credentials, get_current_user_id
 from app.services.gmail_service import GmailService
-from app.services.follow_ups import reopen_follow_ups
+from app.services.follow_ups import latest_inbound_at, reopen_follow_ups
 from app.services.triage_rules import classify_metadata
 from app.services.triage_store import write_triage_results
 from app.models import TriageResult, User, UserEmail
-from sqlalchemy import select
+from sqlalchemy import func, or_, select, update
 
 router = APIRouter()
 
@@ -184,10 +184,13 @@ async def stream_triage_progress(
         )
         reopened = await reopen_follow_ups(db, user_id, email, raw)
         raw_threads = {item["id"]: item for item in raw}
+        inbound = {thread_id: latest_inbound_at(item, email) if email else 0
+                   for thread_id, item in raw_threads.items()}
         threads = [thread for item in raw if (thread := service.normalize_thread(item, message_limit=3))]
         counts = {thread["thread_id"]: thread["message_count"] for thread in threads}
         existing = {row.thread_id: row for row in (await db.execute(
-            select(TriageResult.thread_id, TriageResult.message_count, TriageResult.ai_reviewed_through_ms).where(
+            select(TriageResult.thread_id, TriageResult.message_count, TriageResult.ai_reviewed_through_ms,
+                   TriageResult.last_inbound_at_ms).where(
                 TriageResult.user_id == user_id, TriageResult.email == email, TriageResult.thread_id.in_(counts)
             )
         )).all()} if counts else {}
@@ -200,7 +203,8 @@ async def stream_triage_progress(
             thread_id = thread["thread_id"]
             previous = existing.get(thread_id)
             rule = classify_metadata(thread)
-            if previous is None or previous.message_count is None or counts[thread_id] > previous.message_count:
+            if (previous is None or previous.message_count is None or counts[thread_id] > previous.message_count
+                    or inbound[thread_id] > previous.last_inbound_at_ms):
                 results[thread_id] = rule
             if mode == "off":
                 continue
@@ -243,6 +247,7 @@ async def stream_triage_progress(
             "key_points": row.get("key_points", []), "message_count": counts[row["thread_id"]],
             "ai_reviewed": row["thread_id"] in reviewed_through,
             "ai_reviewed_through_ms": reviewed_through.get(row["thread_id"], 0),
+            "last_inbound_at_ms": inbound[row["thread_id"]],
         } for row in results.values()]
 
         await write_triage_results(db, saved_rows)
@@ -576,84 +581,82 @@ async def get_triage_results(
     email: Optional[str] = None,  # Can now be used for filtering
     label: Optional[str] = None,
     days: Optional[int] = Query(None, ge=1, le=90),
+    review_status: Literal["all", "pending", "reviewed"] = "all",
     limit: int = 50,
     skip: int = 0,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get triage results for the current user
-    
-    Query parameters:
-    - email: Filter by source email
-    - label: Filter by label (NEEDS_REPLY, FYI, ARCHIVE, SPAM_LIKE)
-    - days: Filter by number of days (created_at)
-    - limit: Maximum number of results
-    - skip: Number of results to skip (for pagination)
-    """
-    try:
-        user_id = await get_current_user_id(request, db)
-        
-        # Build query
-        query = select(TriageResult).where(TriageResult.user_id == user_id)
-        
-        if email:
-            query = query.where(TriageResult.email == email)
-            
-        if label:
-            query = query.where(TriageResult.label == label)
+    """List the authenticated user's triage results and optionally filter by review status."""
+    user_id = await get_current_user_id(request, db)
+    filters = [TriageResult.user_id == user_id]
+    if email:
+        filters.append(TriageResult.email == email)
+    if label:
+        filters.append(TriageResult.label == label)
+    if review_status == "pending":
+        filters.append(TriageResult.reviewed_at.is_(None))
+    elif review_status == "reviewed":
+        filters.append(TriageResult.reviewed_at.is_not(None))
 
-        if days:
-            cutoff_date = datetime.utcnow() - timedelta(days=days)
-            query = query.where(TriageResult.created_at >= cutoff_date)
-        
-        query = query.order_by(TriageResult.priority.desc(), TriageResult.created_at.desc())
-        query = query.offset(skip).limit(limit)
-        
-        result = await db.execute(query)
-        triage_results = result.scalars().all()
-        
-        # Get total count for pagination info
-        from sqlalchemy import func
-        count_query = select(func.count()).select_from(TriageResult).where(TriageResult.user_id == user_id)
-        if email:
-            count_query = count_query.where(TriageResult.email == email)
-        if label:
-            count_query = count_query.where(TriageResult.label == label)
-        if days:
-            cutoff_date = datetime.utcnow() - timedelta(days=days)
-            count_query = count_query.where(TriageResult.created_at >= cutoff_date)
-            
-        count_result = await db.execute(count_query)
-        total_count = count_result.scalar()
-        
-        results = []
-        for tr in triage_results:
-            results.append({
-                "id": tr.id,
-                "thread_id": tr.thread_id,
-                "email": tr.email,
-                "label": tr.label,
-                "priority": tr.priority,
-                "summary": tr.summary,
-                "key_points": tr.key_points or [],
-                "created_at": tr.created_at.isoformat() if tr.created_at else None,
-                "updated_at": tr.updated_at.isoformat() if tr.updated_at else None
-            })
-        
-        return {
-            "success": True,
-            "count": len(results),
-            "total_count": total_count,
-            "results": results
-        }
-        
-    except Exception as e:
-        error_str = str(e)
-        print(f"Error getting triage results: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get triage results: {error_str}"
-        )
+    if days:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        if review_status == "reviewed":
+            filters.append(TriageResult.reviewed_at >= cutoff)
+        elif review_status == "pending":
+            filters.append(or_(TriageResult.created_at >= cutoff,
+                               TriageResult.last_inbound_at_ms >= int(cutoff.timestamp() * 1000)))
+        else:
+            filters.append(TriageResult.created_at >= cutoff)
+
+    query = select(TriageResult).where(*filters)
+    query = query.order_by(TriageResult.priority.desc(), TriageResult.created_at.desc(), TriageResult.id.desc())
+    results = (await db.scalars(query.offset(skip).limit(limit))).all()
+    total_count = await db.scalar(select(func.count()).select_from(TriageResult).where(*filters))
+    return {
+        "success": True,
+        "count": len(results),
+        "total_count": total_count,
+        "results": [{
+            "id": result.id,
+            "thread_id": result.thread_id,
+            "email": result.email,
+            "label": result.label,
+            "priority": result.priority,
+            "summary": result.summary,
+            "key_points": result.key_points or [],
+            "created_at": result.created_at.isoformat() if result.created_at else None,
+            "updated_at": result.updated_at.isoformat() if result.updated_at else None,
+            "reviewed_at": result.reviewed_at.isoformat() if result.reviewed_at else None,
+            "last_inbound_at_ms": result.last_inbound_at_ms,
+        } for result in results],
+    }
+
+
+class TriageReviewUpdate(BaseModel):
+    reviewed: StrictBool
+    email: str | None
+    last_inbound_at_ms: int = Field(ge=0)
+
+
+@router.patch("/triage/results/{result_id}/review")
+async def set_triage_review(
+    result_id: int, body: TriageReviewUpdate, request: Request, db: AsyncSession = Depends(get_db)
+):
+    user_id = await get_current_user_id(request, db)
+    owner_filter = (TriageResult.id == result_id, TriageResult.user_id == user_id)
+    reviewed_at = func.coalesce(TriageResult.reviewed_at, func.now()) if body.reviewed else None
+    result = (await db.execute(
+        update(TriageResult).where(
+            *owner_filter, TriageResult.email.is_not_distinct_from(body.email),
+            TriageResult.last_inbound_at_ms == body.last_inbound_at_ms,
+        ).values(reviewed_at=reviewed_at, updated_at=TriageResult.updated_at).returning(TriageResult.reviewed_at)
+    )).one_or_none()
+    if result is None:
+        if await db.scalar(select(TriageResult.id).where(*owner_filter)) is None:
+            raise HTTPException(404, "Triage result not found")
+        raise HTTPException(409, "This conversation changed. Open the latest version to review it.")
+    await db.commit()
+    return {"reviewed_at": result.reviewed_at.isoformat() if result.reviewed_at else None}
 
 
 @router.delete("/triage/results/{thread_id}")

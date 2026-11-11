@@ -38,7 +38,7 @@ export default function Dashboard({ user, selectedEmail, promotions }) {
     const controller = new AbortController();
     const get = (url, params) => api.get(url, { params, signal: controller.signal });
     Promise.allSettled([
-      get('/triage/results', { email: mailbox, days: 3, limit: previewLimit }),
+      get('/triage/results', { email: mailbox, days: 3, limit: previewLimit, review_status: 'pending' }),
       get('/follow-ups', { email: mailbox, limit: previewLimit }),
       get('/gmail/threads', { email: mailbox, days: 14, max_results: previewLimit, promotions }),
     ]).then(results => {
