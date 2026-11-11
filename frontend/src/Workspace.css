@@ -371,9 +371,10 @@
 .workspace-shortcuts { margin-bottom: 9px; }
 .workspace-shortcuts .quick-actions { margin-top: 8px; }
 
-.workspace-ai-review { display: flex; align-items: flex-start; gap: 8px; margin: 0 20px 11px; color: var(--ink); font-size: 12px; cursor: pointer; }
-.workspace-ai-review input { margin-top: 2px; accent-color: var(--accent); }
-.workspace-ai-review small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+.workspace-ai-review { display: grid; justify-items: start; gap: 5px; color: var(--ink); }
+.workspace-ai-review .workspace-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.workspace-ai-review small { color: var(--muted); font-size: 11px; }
+.workspace-ai-review .workspace-error { color: var(--danger); }
 
 .workspace-autosync { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
 .workspace-autosync .workspace-icon { width: 14px; height: 14px; color: var(--accent-dark); }

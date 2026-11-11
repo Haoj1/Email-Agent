@@ -1,4 +1,4 @@
-"""Review an entire page of ambiguous conversations in one model request."""
+"""Review one batch of email previews or selected body excerpts."""
 import json
 import math
 
@@ -9,11 +9,13 @@ from app.agents.llm_factory import get_triage_llm
 from app.services.triage_rules import triage_excerpt
 
 
-def review_batch(threads):
+def review_batch(threads, *, bodies=None):
+    bodies = bodies or {}
     if not threads:
         return {}
     items = [{
-        "i": index, "subject": subject, "from": sender, "excerpt": excerpt,
+        "i": index, "subject": subject, "from": sender,
+        "excerpt": bodies.get(thread["thread_id"], excerpt),
     } for index, thread in enumerate(threads[:25])
       for subject, sender, excerpt in (triage_excerpt(thread),)]
     prompt = (

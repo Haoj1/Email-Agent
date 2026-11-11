@@ -11,14 +11,15 @@ os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'  # Set by default for developmen
 from fastapi import APIRouter, Request, Response, HTTPException, Depends, Query
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, select, update
+from pydantic import BaseModel
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
-from typing import Optional
+from typing import Literal, Optional
 from urllib.parse import urlencode
 import httpx
 import re
@@ -290,7 +291,28 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
         ],
         "authenticated": True,
         "server_sync": settings.MAILBOX_SYNC_ENABLED,
+        "ai_review_mode": user.ai_review_mode,
     }
+
+
+class EmailPreferences(BaseModel):
+    ai_review_mode: Literal["off", "unclear", "primary_important"]
+
+
+@router.patch("/preferences")
+async def save_email_preferences(
+    preferences: EmailPreferences, request: Request, db: AsyncSession = Depends(get_db)
+):
+    session = await authenticated_session(request, db)
+    mode = preferences.ai_review_mode
+    # Selecting a new scope applies to incoming mail from that point forward.
+    since = None if mode == "off" else case(
+        (User.ai_review_mode == mode, func.coalesce(User.ai_review_since, func.now())),
+        else_=func.now(),
+    )
+    await db.execute(update(User).where(User.id == session.user_id).values(ai_review_mode=mode, ai_review_since=since))
+    await db.commit()
+    return {"ai_review_mode": mode}
 
 
 @router.post("/logout")

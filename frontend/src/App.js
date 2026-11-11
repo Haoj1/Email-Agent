@@ -69,8 +69,9 @@ function WorkspaceView({ children, activeMailbox, mailboxCount }) {
 
 // Inner component that has access to EmailCache context
 function AppContent() {
-  const { runTriage, cancelTriage, clearCache, reviewUnclear, noteServerSync } = useEmailCache();
+  const { runTriage, cancelTriage, clearCache, noteServerSync } = useEmailCache();
   const [user, setUser] = useState(null);
+  const reviewMode = user?.ai_review_mode || 'off';
   const [theme, setTheme] = useState(initialTheme);
   const [promotions, setPromotions] = useState(() => {
     try {
@@ -102,9 +103,9 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
-    if (!user?.authenticated || !user.emails?.length || (user.server_sync && !reviewUnclear)) return;
+    if (!user?.authenticated || !user.emails?.length || (user.server_sync && reviewMode === 'off')) return;
     const emails = user.emails.map(account => account.email).filter(Boolean);
-    const check = () => runTriage({ emails, userId: user.user_id }).catch(error => {
+    const check = () => runTriage({ emails, userId: user.user_id, reviewMode }).catch(error => {
       console.error('Unable to start automatic email check:', error);
     });
     check();
@@ -116,7 +117,7 @@ function AppContent() {
       document.removeEventListener('visibilitychange', check);
       window.removeEventListener('online', check);
     };
-  }, [user, runTriage, reviewUnclear]);
+  }, [user, runTriage, reviewMode]);
 
   useEffect(() => {
     if (!user?.server_sync) return;
@@ -163,6 +164,13 @@ function AppContent() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const saveAiReviewMode = async mode => {
+    const { data } = await api.patch('/auth/preferences', { ai_review_mode: mode });
+    cancelTriage();
+    setUser(current => current?.user_id === user.user_id
+      ? { ...current, ai_review_mode: data.ai_review_mode } : current);
   };
 
   const handleSelectEmail = (email) => {
@@ -248,8 +256,7 @@ function AppContent() {
                             <EmailTriagePage
                               user={user}
                               selectedEmail={selectedEmail}
-                              onSelectEmail={handleSelectEmail}
-                              onLogout={handleLogout}
+                              onAiReviewChange={saveAiReviewMode}
                             />
                           }
                         />

@@ -30,7 +30,6 @@ class TriageRequest(BaseModel):
     days: Optional[int] = 7
     email: Optional[str] = None
     cursor: Optional[str] = Field(default=None, max_length=4096)
-    review_unclear: bool = False
     automatic: bool = False
     checkpoint: Optional[str] = Field(default=None, max_length=4096)
 
@@ -54,6 +53,82 @@ def _triage_token(value, user_id, email, kind):
     return data
 
 
+NON_PRIMARY_LABELS = {"CATEGORY_SOCIAL", "CATEGORY_PROMOTIONS", "CATEGORY_UPDATES", "CATEGORY_FORUMS"}
+NON_INBOUND_LABELS = {"SENT", "DRAFT", "SPAM", "TRASH", "CHAT"}
+
+
+def _review_candidates(messages, mode, cutoff_ms, rule_label):
+    if mode == "unclear":
+        messages = messages[-1:] if rule_label == "REVIEW" else ()
+    candidates = []
+    for message in messages:
+        stamp = int(message.get("internalDate") or 0)
+        labels = set(message.get("labelIds") or ())
+        if stamp <= cutoff_ms or labels & NON_INBOUND_LABELS:
+            continue
+        if mode == "primary_important" and not (
+            "IMPORTANT" in labels or "CATEGORY_PERSONAL" in labels or
+            ("INBOX" in labels and not labels & NON_PRIMARY_LABELS)
+        ):
+            continue
+        candidates.append((stamp, message))
+    return candidates
+
+
+async def _review_messages(service, candidates, mode, request):
+    from app.agents.batch_triage import review_batch
+
+    reviewed = {}
+    calls = 0
+    unavailable = False
+    for offset in range(0, len(candidates), 25):
+        if await request.is_disconnected():
+            break
+        page = candidates[offset:offset + 25]
+        calls += 1
+        try:
+            batch = await asyncio.to_thread(review_batch, page)
+        except Exception as exc:
+            print(f"Triage preview review unavailable: {type(exc).__name__}")
+            unavailable = True
+            continue
+        reviewed.update(batch)
+        unavailable |= len(batch) != len(page)
+        if mode != "primary_important":
+            continue
+        follow_up = [item for item in page if batch.get(item["thread_id"], {}).get("label") == "REVIEW"]
+        for start in range(0, len(follow_up), 10):
+            if await request.is_disconnected():
+                return reviewed, calls, unavailable
+            bodies = {}
+            body_items = []
+            for item in follow_up[start:start + 10]:
+                message_id = item["thread_id"]
+                try:
+                    body = await asyncio.to_thread(service.get_message_text, message_id)
+                except HttpError as exc:
+                    if exc.resp.status != 404:
+                        print(f"Triage body unavailable: {type(exc).__name__}")
+                        reviewed.pop(message_id, None)
+                        unavailable = True
+                    continue
+                if body:
+                    bodies[message_id] = body[:1600]
+                    body_items.append(item)
+            if body_items and not await request.is_disconnected():
+                calls += 1
+                try:
+                    refined = await asyncio.to_thread(review_batch, body_items, bodies=bodies)
+                except Exception as exc:
+                    print(f"Triage body review unavailable: {type(exc).__name__}")
+                    refined = {}
+                for item in body_items:
+                    reviewed.pop(item["thread_id"], None)
+                reviewed.update(refined)
+                unavailable |= len(refined) != len(body_items)
+    return reviewed, calls, unavailable
+
+
 async def stream_triage_progress(
     triage_request: TriageRequest, request: Request, db: AsyncSession, user_id: int
 ) -> AsyncGenerator[str, None]:
@@ -64,23 +139,39 @@ async def stream_triage_progress(
         email = triage_request.email or await db.scalar(
             select(UserEmail.email).where(UserEmail.user_id == user_id, UserEmail.is_primary.is_(True))
         )
+        mode, review_since = (await db.execute(
+            select(User.ai_review_mode, User.ai_review_since).where(User.id == user_id)
+        )).one()
+        if not review_since:
+            mode = "off"
+        cutoff_ms = int(review_since.timestamp() * 1000) if review_since else 0
         days = max(1, min(triage_request.days or 7, 30))
         page_size = max(1, min(triage_request.max_results or 25, 25))
         now = datetime.now(timezone.utc)
         through = int(now.timestamp())
         start = int((now - timedelta(days=days)).timestamp())
+        if cutoff_ms and settings.MAILBOX_SYNC_ENABLED:
+            start = cutoff_ms // 1000
+        elif cutoff_ms:
+            start = min(start, cutoff_ms // 1000)
+        review_scope = [mode, cutoff_ms]
+        retry_from = None
         if triage_request.checkpoint:
             try:
                 checkpoint = _triage_token(triage_request.checkpoint, user_id, email, "triage-checkpoint")
-                # A short overlap catches late-arriving search results. Unchanged rows are skipped.
-                start = max(start, min(int(checkpoint["through"]), through) - 600)
+                # An overlapping checkpoint is safe only within the same preference scope.
+                if checkpoint.get("review_scope") == review_scope or (mode == "off" and "review_scope" not in checkpoint):
+                    start = max(start, min(int(checkpoint["through"]), through) - 600)
             except (JWTError, KeyError, TypeError, ValueError):
                 pass
         query = f"after:{start} before:{through}"
         if triage_request.cursor:
             try:
                 saved = _triage_token(triage_request.cursor, user_id, email, "triage")
+                if saved.get("review_scope") != review_scope and (mode != "off" or "review_scope" in saved):
+                    raise JWTError("Review scope changed")
                 query, page_token, page_size = saved["query"], saved["page_token"], saved["page_size"]
+                retry_from = saved.get("retry_from")
                 through = int(query.rsplit("before:", 1)[1])
             except (JWTError, KeyError, TypeError, ValueError, IndexError):
                 yield _triage_event("error", code="cursor_expired", error="This scan expired. A fresh scan can continue.")
@@ -92,46 +183,57 @@ async def stream_triage_progress(
             service.get_thread_page, page_size, days, query=query, page_token=page_token, strict=True
         )
         reopened = await reopen_follow_ups(db, user_id, email, raw)
+        raw_threads = {item["id"]: item for item in raw}
         threads = [thread for item in raw if (thread := service.normalize_thread(item, message_limit=3))]
         counts = {thread["thread_id"]: thread["message_count"] for thread in threads}
         existing = {row.thread_id: row for row in (await db.execute(
-            select(TriageResult.thread_id, TriageResult.message_count, TriageResult.label, TriageResult.ai_reviewed).where(
-                TriageResult.user_id == user_id, TriageResult.thread_id.in_(counts)
+            select(TriageResult.thread_id, TriageResult.message_count, TriageResult.ai_reviewed_through_ms).where(
+                TriageResult.user_id == user_id, TriageResult.email == email, TriageResult.thread_id.in_(counts)
             )
         )).all()} if counts else {}
         await db.commit()
 
-        results = []
-        uncertain = []
+        results = {}
+        candidates = {}
+        previews = []
         for thread in threads:
             thread_id = thread["thread_id"]
             previous = existing.get(thread_id)
-            changed = previous is None or previous.message_count is None or counts[thread_id] > previous.message_count
-            if changed:
-                result = classify_metadata(thread)
-                results.append(result)
-                if result["label"] == "REVIEW":
-                    uncertain.append(thread)
-            elif previous.label == "REVIEW" and triage_request.review_unclear and not previous.ai_reviewed:
-                uncertain.append(thread)
+            rule = classify_metadata(thread)
+            if previous is None or previous.message_count is None or counts[thread_id] > previous.message_count:
+                results[thread_id] = rule
+            if mode == "off":
+                continue
+            reviewed_through = previous.ai_reviewed_through_ms if previous else 0
+            eligible = _review_candidates(raw_threads[thread_id]["messages"], mode,
+                                          max(cutoff_ms, reviewed_through), rule["label"])
+            if eligible:
+                candidates[thread_id] = sorted(eligible, key=lambda candidate: candidate[0])
+                previews.extend(service.normalize_thread({"id": message["id"], "messages": [message]})
+                                for _, message in eligible)
 
         skipped = len(threads) - len(results)
         ai_calls = 0
-        reviewed = {}
         ai_reviewed = 0
         ai_unavailable = False
-        if triage_request.review_unclear and uncertain:
-            yield _triage_event("status", message=f"AI reviewing {len(uncertain)} unclear conversations in one batch…")
-            ai_calls = 1
-            try:
-                from app.agents.batch_triage import review_batch
-
-                reviewed = await asyncio.to_thread(review_batch, uncertain)
-                ai_reviewed = len(reviewed)
-                results = [row for row in results if row["thread_id"] not in reviewed] + list(reviewed.values())
-            except Exception as exc:
-                print(f"Triage batch review unavailable: {type(exc).__name__}")
-                ai_unavailable = True
+        reviewed_through = {}
+        if previews:
+            yield _triage_event("status", message=f"AI reviewing {len(previews)} new email previews…")
+            reviewed, ai_calls, ai_unavailable = await _review_messages(service, previews, mode, request)
+            for thread_id, entries in candidates.items():
+                if not all(message["id"] in reviewed for _, message in entries):
+                    first = entries[0][0] // 1000
+                    retry_from = first if retry_from is None else min(first, retry_from)
+                    continue
+                decisions = [reviewed[message["id"]] for _, message in entries]
+                # Keep the most actionable decision and retain the rest as key points.
+                lead = max(reversed(decisions), key=lambda decision: decision["priority"])
+                results[thread_id] = {
+                    **lead, "thread_id": thread_id,
+                    "key_points": [decision["summary"] for decision in decisions if decision is not lead][-5:],
+                }
+                reviewed_through[thread_id] = entries[-1][0]
+                ai_reviewed += len(decisions)
 
         yield _triage_event("progress", current=len(threads), total=len(threads), progress=100)
 
@@ -139,18 +241,21 @@ async def stream_triage_progress(
             "user_id": user_id, "thread_id": row["thread_id"], "email": email,
             "label": row["label"], "priority": row["priority"], "summary": row["summary"],
             "key_points": row.get("key_points", []), "message_count": counts[row["thread_id"]],
-            "ai_reviewed": row["thread_id"] in reviewed,
-        } for row in results if row.get("thread_id") in counts and not row.get("classification_failed")]
+            "ai_reviewed": row["thread_id"] in reviewed_through,
+            "ai_reviewed_through_ms": reviewed_through.get(row["thread_id"], 0),
+        } for row in results.values()]
 
         await write_triage_results(db, saved_rows)
         await db.commit()
         cursor = jwt.encode({
             "kind": "triage", "user_id": user_id, "email": email, "query": query,
-            "page_token": next_token, "page_size": page_size, "exp": now + timedelta(hours=8),
+            "page_token": next_token, "page_size": page_size, "review_scope": review_scope,
+            "retry_from": retry_from, "exp": now + timedelta(hours=8),
         }, settings.SESSION_SECRET, algorithm="HS256") if next_token else None
         checkpoint = jwt.encode({
-            "kind": "triage-checkpoint", "user_id": user_id, "email": email, "through": through,
-            "exp": now + timedelta(days=7),
+            "kind": "triage-checkpoint", "user_id": user_id, "email": email,
+            "through": min(through, retry_from) if retry_from is not None else through,
+            "review_scope": review_scope, "exp": now + timedelta(days=7),
         }, settings.SESSION_SECRET, algorithm="HS256") if not next_token else None
         yield _triage_event("complete", success=True, scanned_count=len(threads), skipped_count=skipped,
                             processed_count=len(saved_rows), next_cursor=cursor, checkpoint=checkpoint,

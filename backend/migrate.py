@@ -16,7 +16,12 @@ async def migrate():
                 for model in (AssistChatMessage, FollowUp, LoginSession, MailboxSyncState, MailboxThreadIndex):
                     await connection.run_sync(lambda sync: model.__table__.create(sync, checkfirst=True))
                 await connection.execute(text(
-                    "ALTER TABLE triage_results ADD COLUMN IF NOT EXISTS ai_reviewed boolean NOT NULL DEFAULT false"
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_review_since timestamptz, "
+                    "ADD COLUMN IF NOT EXISTS ai_review_mode varchar(24) NOT NULL DEFAULT 'off'"
+                ))
+                await connection.execute(text(
+                    "ALTER TABLE triage_results ADD COLUMN IF NOT EXISTS ai_reviewed boolean NOT NULL DEFAULT false, "
+                    "ADD COLUMN IF NOT EXISTS ai_reviewed_through_ms bigint NOT NULL DEFAULT 0"
                 ))
                 await connection.execute(text(
                     "ALTER TABLE email_embeddings ADD COLUMN IF NOT EXISTS user_email_id integer "
