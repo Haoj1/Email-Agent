@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from httplib2 import Response
 from googleapiclient.errors import HttpError
+from langchain_core.messages import AIMessage, ToolMessage
 from sqlalchemy import func, select, text, update
 
 from app.config import settings
@@ -338,6 +339,98 @@ class WorkflowTest(IsolatedAsyncioTestCase):
                 async with AsyncSessionLocal() as db:
                     self.assertEqual((await db.get(MailboxSyncState, first.id)).history_id, "100")
                     self.assertTrue(await db.scalar(select(func.count()).select_from(EmailEmbedding)))
+
+                async def ask_copilot(question, **options):
+                    response = await client.post("/api/assist-chat/ask", json={
+                        "question": question, "email": PRIMARY, "local_timezone": "America/Chicago", **options,
+                    })
+                    events = [json.loads(line.removeprefix("data: ")) for line in response.text.splitlines()
+                              if line.startswith("data: ")]
+                    self.assertEqual(events[-1]["type"], "result", events)
+                    return events[-1]
+
+                overdue = now - timedelta(days=1)
+                waiting = await edit("waiting", due=overdue.isoformat())
+                with patch("app.agents.assist_chat_agent.get_chat_llm", side_effect=AssertionError("Shortcut uses no model")):
+                    quick = await ask_copilot("Show my open follow-ups", action="follow_ups")
+                self.assertIn("Waiting for reply", quick["answer"])
+                self.assertEqual(quick["sources"][0]["email"], PRIMARY)
+
+                def tool_call(name, args):
+                    return AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": "fixture-tool"}])
+
+                with patch("app.agents.assist_chat_agent.get_chat_llm") as model:
+                    llm = model.return_value.bind_tools.return_value
+                    llm.ainvoke = AsyncMock(side_effect=[
+                        tool_call("list_follow_ups", {"overdue": True, "status": "waiting", "all_mailboxes": True}),
+                        AIMessage(content="One follow-up is overdue."),
+                    ])
+                    result = await ask_copilot("What is overdue across my mailboxes?")
+                    tool_reply = next(msg for msg in llm.ainvoke.call_args.args[0] if isinstance(msg, ToolMessage))
+                    self.assertEqual(json.loads(tool_reply.content)["count"], 1)
+                    self.assertEqual(result["sources"][0]["email"], PRIMARY)
+                    self.assertEqual(result["follow_up_actions"], [])
+                    self.assertEqual((await read())["status"], "waiting")
+
+                    llm.ainvoke = AsyncMock(side_effect=[
+                        tool_call("prepare_follow_up", {"thread_id": THREAD, "due": "2026-11-20"}),
+                        AIMessage(content="I prepared the deadline change."),
+                    ])
+                    result = await ask_copilot("Move that follow-up to November 20", session_id=result["session_id"])
+                    action, = result["follow_up_actions"]
+                    self.assertEqual(action["status"], "waiting")
+                    self.assertEqual(action["due_at"], "2026-11-20T23:59:00-06:00")
+                    self.assertEqual((await read())["due_at"], waiting["due_at"])
+
+                    path = "/api/follow-ups/" + THREAD
+                    body = {key: action[key] for key in ("status", "due_at", "expected_updated_at")}
+                    saved = await client.put(path, params={"email": PRIMARY}, json=body)
+                    self.assertEqual(saved.status_code, 200, saved.text)
+                    self.assertEqual(datetime.fromisoformat(saved.json()["item"]["due_at"]),
+                                     datetime.fromisoformat(action["due_at"]))
+                    self.assertEqual((await client.put(path, params={"email": PRIMARY}, json=body)).status_code, 409)
+                    self.assertEqual((await read(SECONDARY))["status"], "later")
+
+                    llm.ainvoke = AsyncMock(side_effect=[
+                        tool_call("prepare_follow_up", {"thread_id": THREAD, "mailbox": OTHER, "status": "done"}),
+                        AIMessage(content="That mailbox is unavailable."),
+                    ])
+                    result = await ask_copilot("Complete the task in a different mailbox", session_id=result["session_id"])
+                    self.assertEqual(result["follow_up_actions"], [])
+
+                    llm.ainvoke = AsyncMock(side_effect=[
+                        tool_call("prepare_follow_up", {"thread_id": THREAD, "status": "done"}),
+                        AIMessage(content="I prepared a completion action."),
+                    ])
+                    result = await ask_copilot("Mark the same follow-up complete", session_id=result["session_id"])
+                    complete, = result["follow_up_actions"]
+                    self.assertEqual((await read())["status"], "waiting")
+                    self.assertEqual(complete["status"], "done")
+                    body = {key: complete[key] for key in ("status", "due_at", "expected_updated_at")}
+                    self.assertEqual((await client.put(path, params={"email": PRIMARY}, json=body)).status_code, 200)
+                    self.assertEqual((await read())["status"], "done")
+
+                    new_thread = {"id": "new-follow-up", "messages": [
+                        message("new-follow-up-message", since + 9, senders[PRIMARY], "Confirm next steps"),
+                    ]}
+                    llm.ainvoke = AsyncMock(side_effect=[
+                        tool_call("search_mailbox", {"query": "subject:Sample"}),
+                        tool_call("prepare_follow_up", {"thread_id": new_thread["id"], "status": "later"}),
+                        AIMessage(content="I prepared a new follow-up."),
+                    ])
+                    with (
+                        patch.object(GmailService, "get_threads", return_value=[new_thread]),
+                        patch.object(GmailService, "get_thread_metadata", return_value=new_thread),
+                    ):
+                        result = await ask_copilot("Add the matching email to Follow-ups")
+                        addition, = result["follow_up_actions"]
+                        self.assertIsNone(addition["expected_updated_at"])
+                        add_path = "/api/follow-ups/" + new_thread["id"]
+                        params = {"email": PRIMARY}
+                        self.assertIsNone((await client.get(add_path, params=params)).json()["item"])
+                        body = {key: addition[key] for key in ("status", "due_at", "expected_updated_at")}
+                        self.assertEqual((await client.put(add_path, params=params, json=body)).status_code, 200)
+                        self.assertEqual((await client.put(add_path, params=params, json=body)).status_code, 409)
 
             async def search_public(query):
                 self.assertEqual(query, "public launch dates")

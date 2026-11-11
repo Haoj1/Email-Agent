@@ -1,9 +1,47 @@
-"""Detect inbound replies from Gmail metadata already fetched by synchronization."""
+"""Follow-up records and inbound replies from Gmail metadata."""
+from datetime import timezone
 from email.utils import parseaddr
+from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import BigInteger, String, column, func, select, update, values
+from sqlalchemy import BigInteger, String, case, column, func, select, update, values
 
 from app.models import FollowUp, UserEmail
+
+
+FollowUpStatus = Literal["reply", "waiting", "later", "done"]
+
+
+def follow_up_timezone(name):
+    try:
+        return ZoneInfo(name) if name else timezone.utc
+    except (ZoneInfoNotFoundError, ValueError):
+        return timezone.utc
+
+
+def follow_up_record(item):
+    return {name: getattr(item, name) for name in (
+        "thread_id", "subject", "status", "due_at", "reopened_at", "updated_at",
+    )}
+
+
+async def list_follow_up_records(db, user_id, *, email=None, status=None, overdue=False, limit=40, offset=0):
+    query = select(FollowUp, UserEmail.email).join(UserEmail, UserEmail.id == FollowUp.user_email_id).where(
+        UserEmail.user_id == user_id
+    )
+    if email is not None:
+        query = query.where(UserEmail.email == email)
+    query = query.where(FollowUp.status == status) if status else query.where(FollowUp.status != "done")
+    if overdue:
+        query = query.where(FollowUp.status != "done", FollowUp.due_at < func.now())
+    rows = (await db.execute(query.order_by(
+        case((FollowUp.status == "done", None), else_=FollowUp.due_at).asc().nulls_last(),
+        FollowUp.updated_at.desc(), FollowUp.thread_id, UserEmail.id,
+    ).offset(offset).limit(limit + 1))).all()
+    return {
+        "items": [{**follow_up_record(item), "email": mailbox} for item, mailbox in rows[:limit]],
+        "has_more": len(rows) > limit,
+    }
 
 
 def latest_inbound_at(thread, mailbox):

@@ -26,11 +26,12 @@ router = APIRouter()
 class ChatRequest(BaseModel):
     """Request model for assist chat"""
     question: str = Field(min_length=1, max_length=8000)
-    action: Literal["unread", "attachments", "agenda", "reply_queue"] | None = None
+    action: Literal["unread", "attachments", "agenda", "reply_queue", "follow_ups"] | None = None
     session_id: Optional[str] = None  # If provided, continue existing session
     conversation_history: Optional[List[dict]] = Field(default=None, max_length=60)
     email: Optional[str] = None  # Optional email account to use for Gmail tools
     semantic_scope: Literal["selected", "all"] = "selected"
+    local_timezone: str | None = Field(default=None, max_length=80)
 
 
 class ChatResponse(BaseModel):
@@ -109,7 +110,7 @@ async def stream_chat_response(
         primary_email = next((account.email for account in accounts if account.is_primary), None)
         selected = chat_request.email or primary_email or (accounts[0].email if accounts else None)
         for account in accounts:
-            if web_requested or chat_request.action == "reply_queue" or (chat_request.action and account.email != selected):
+            if web_requested or chat_request.action in ("reply_queue", "follow_ups") or (chat_request.action and account.email != selected):
                 continue
             try:
                 credentials = await get_user_credentials(request, account.email, db)
@@ -130,7 +131,8 @@ async def stream_chat_response(
                     from app.services.copilot_shortcuts import run_quick_action
 
                     work = run_quick_action(chat_request.action, db, user_id, gmail_services, selected,
-                                            credentials_by_account.get(selected), steps.put_nowait)
+                                            credentials_by_account.get(selected), steps.put_nowait,
+                                            local_timezone=chat_request.local_timezone)
                 else:
                     from app.agents.assist_chat_agent import AssistChatAgent
 
@@ -139,6 +141,8 @@ async def stream_chat_response(
                         primary_gmail_service=gmail_services.get(selected), email=selected,
                         calendar_credentials=credentials_by_account.get(selected),
                         semantic_email=None if chat_request.semantic_scope == "all" else selected,
+                        connected_mailboxes=[account.email for account in accounts],
+                        local_timezone=chat_request.local_timezone,
                     )
                     work = agent.chat(chat_request.question, history, steps.put_nowait)
                 return await asyncio.wait_for(work, timeout=75)

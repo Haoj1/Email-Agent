@@ -344,6 +344,12 @@
 .workspace-copilot-sources a { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 4px 6px; color: var(--accent-dark); border: 1px solid var(--line); border-radius: 5px; font-size: 11px; text-decoration: none; overflow-wrap: anywhere; }
 .workspace-copilot-sources a:hover { background: var(--soft); }
 .workspace-copilot-sources .workspace-icon { width: 12px; height: 12px; }
+.workspace-follow-up-action { display: grid; justify-items: start; gap: 6px; margin-top: 10px; padding: 10px; background: var(--control); border: 1px solid var(--line); border-radius: 8px; overflow-wrap: anywhere; }
+.workspace-follow-up-action > strong { font-size: 13px; }
+.workspace-follow-up-action > small { color: var(--muted); font-size: 11px; }
+.workspace-follow-up-action > span { font-size: 12px; }
+.workspace-follow-up-action .btn-primary { min-height: 30px; font-size: 11px; }
+.workspace-follow-up-action [role="alert"] { color: var(--danger); }
 .workspace-shell .chat-empty-state .workspace-copilot-description { margin-bottom: 12px; }
 .workspace-shell .thread-chat-panel .quick-actions { gap: 7px; }
 @media (max-width: 420px) {

@@ -9,8 +9,10 @@ export const followUpLabels = {
 
 const endpoint = threadId => '/follow-ups/' + encodeURIComponent(threadId);
 
-export function saveFollowUp(threadId, email, status, dueAt) {
-  return api.put(endpoint(threadId), { status, due_at: dueAt }, { params: { email } });
+export function saveFollowUp(threadId, email, status, dueAt, expectedUpdatedAt) {
+  return api.put(endpoint(threadId), {
+    status, due_at: dueAt, expected_updated_at: expectedUpdatedAt,
+  }, { params: { email } });
 }
 
 function localDateTime(value) {
