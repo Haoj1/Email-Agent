@@ -3,9 +3,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
+import FollowUpAction from '../followups/FollowUpAction';
 import '../thread/ThreadChatPanel.css';
 
 const quickActions = [
+  { action: 'follow_ups', label: 'Follow-ups', prompt: 'Show my open follow-ups.' },
   { action: 'reply_queue', label: 'Needs a reply', prompt: 'Which emails need a reply this week? Show the next action for each.' },
   { action: 'unread', label: 'Find unread', prompt: 'Find unread emails from the past seven days. Use live Gmail search.' },
   { action: 'attachments', label: 'Find attachments', prompt: 'Find recent conversations with PDF attachments and link to them.' },
@@ -22,6 +24,8 @@ const toolLabels = {
   get_important_emails: 'Checking emails that need attention',
   query_triage_results: 'Checking emails that need attention',
   get_thread: 'Reading the conversation',
+  list_follow_ups: 'Checking follow-ups',
+  prepare_follow_up: 'Preparing a follow-up action',
 };
 
 function sourcePath(source) {
@@ -150,6 +154,7 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen, mailboxCount, embedde
           question: userMessage, action, session_id: sessionId,
           conversation_history: history, email: selectedEmail || null,
           semantic_scope: allMailboxes ? "all" : "selected",
+          local_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
       });
       if (!response.ok || !response.body) throw new Error(`Copilot request failed (${response.status}).`);
@@ -189,6 +194,7 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen, mailboxCount, embedde
       setMessages(previous => [...previous, {
         role: 'assistant', content: finalResult.answer,
         citations: finalResult.citations || [], sources: finalResult.sources || [],
+        follow_up_actions: finalResult.follow_up_actions || [],
         tool_calls: finalResult.tool_calls || [], used_web_search: !!finalResult.used_web_search, timestamp: new Date(),
       }]);
       if (showSessionList) loadSessions();
@@ -553,6 +559,9 @@ function AssistChatPanel({ onClose, selectedEmail, isOpen, mailboxCount, embedde
                             ))}
                           </div>
                         )}
+                        {msg.follow_up_actions?.map(action => (
+                          <FollowUpAction key={sourcePath(action)} action={action} />
+                        ))}
                         {msg.used_web_search && (
                           <div
                             className="message-web-search-badge"

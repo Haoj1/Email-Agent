@@ -3,6 +3,7 @@ import asyncio
 import re
 
 from app.services.calendar_service import upcoming_calendar_events
+from app.services.follow_ups import follow_up_timezone, list_follow_up_records
 from app.services.mail_search import summarize_threads
 from app.services.priority_lookup import lookup_priority
 
@@ -17,10 +18,12 @@ def _markdown(value):
     return re.sub(r"([\\`*_[\]<>])", r"\\\1", str(value or "").replace("\n", " "))
 
 
-async def run_quick_action(action, db, user_id, services, account, credentials, report):
+async def run_quick_action(action, db, user_id, services, account, credentials, report, *, local_timezone=None):
     if action == "reply_queue":
         name = "get_important_emails"
         heading = "High-priority conversations marked for reply"
+    elif action == "follow_ups":
+        name, heading = "list_follow_ups", "Open follow-ups"
     elif action == "agenda":
         name, args, heading = "list_upcoming_events", {"days": 7, "limit": 8}, "Calendar for the next seven days"
     else:
@@ -33,6 +36,11 @@ async def run_quick_action(action, db, user_id, services, account, credentials, 
         if not result["success"]:
             return {"success": False, "error": "Could not read the list of emails that need a reply."}
         rows = result["results"]
+    elif action == "follow_ups":
+        if account is None:
+            return {"success": False, "error": "Select a connected mailbox to see its follow-ups."}
+        result = await list_follow_up_records(db, user_id, email=account, limit=8)
+        rows = result["items"]
     elif action == "agenda":
         if credentials is None:
             return {"success": False, "error": "Connect the selected mailbox to view its calendar."}
@@ -54,14 +62,24 @@ async def run_quick_action(action, db, user_id, services, account, credentials, 
         else:
             title = row.get("subject") or ""
             label = title or row.get("summary") or "Conversation"
-            lines.append(f'- {_markdown(label)} ({row["thread_id"]})')
+            detail = ""
+            if action == "follow_ups":
+                status = {"reply": "I need to reply", "waiting": "Waiting for reply", "later": "Handle later"}[row["status"]]
+                due = row.get("due_at")
+                detail = f" · {status}"
+                if due:
+                    when = due.astimezone(follow_up_timezone(local_timezone)).strftime("%b %d, %H:%M")
+                    detail += f" · Due {_markdown(when)}"
+            lines.append(f'- {_markdown(label)} ({row["thread_id"]}){detail}')
             sources.append({
                 "thread_id": row["thread_id"], "subject": title[:160],
                 "email": row.get("email_account") or row.get("email") or account,
             })
 
-    empty = ("No matching priority results. Select Check emails to check for new messages."
-             if action == "reply_queue" else "No matches in this time range.")
+    empty = {
+        "reply_queue": "No matching priority results.",
+        "follow_ups": "No open follow-ups in the selected mailbox.",
+    }.get(action, "No matches in this time range.")
     return {
         "success": True,
         "answer": f"**{heading}**\n\n" + ("\n".join(lines) if lines else empty),
