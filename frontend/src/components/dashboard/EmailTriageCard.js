@@ -16,6 +16,7 @@ export default function EmailTriageCard({
 }) {
   const isStandalonePage = useLocation().pathname === '/triage';
   const results = triageResults?.data?.results || [];
+  const isReviewed = reviewStatus === 'reviewed';
   const reviewBusy = reviewingId !== null;
   const busy = runningTriage || loadingTriageResults || reviewBusy;
   const [savingMode, setSavingMode] = useState(false);
@@ -119,10 +120,13 @@ export default function EmailTriageCard({
                 {result.key_points?.length > 0 && <details className="priority-points"><summary>Key points</summary><ul>{result.key_points.map((point, i) => <li key={i}>{point}</li>)}</ul></details>}
                 <div className="priority-item-footer">
                   {result.email && <small title={result.email}>{result.email}</small>}
-                  {result.id && <button type="button" className="workspace-quiet priority-review-action"
-                    disabled={reviewBusy || loadingTriageResults} onClick={() => onSetReviewed(result)}>
-                    {reviewingId === result.id ? 'Saving…' : reviewStatus === 'reviewed' ? 'Back to review' : 'Mark as reviewed'}
-                  </button>}
+                  {result.id && <label className="priority-review-action" aria-busy={reviewingId === result.id}>
+                    <input type="checkbox"
+                      checked={reviewingId === result.id ? !isReviewed : isReviewed}
+                      disabled={reviewBusy || loadingTriageResults}
+                      onChange={event => onSetReviewed(result, event.target.checked)} />
+                    <span>{isReviewed ? 'Reviewed' : 'Mark as reviewed'}</span>
+                  </label>}
                 </div>
               </article>
             </li>

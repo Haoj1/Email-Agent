@@ -95,8 +95,7 @@ function EmailTriagePage({ user, selectedEmail, onAiReviewChange }) {
     loadTriageResults({ status });
   };
 
-  const setReviewed = async item => {
-    const reviewed = reviewStatus === 'pending';
+  const setReviewed = async (item, reviewed) => {
     setReviewingId(item.id);
     setReviewMessage(null);
     try {
