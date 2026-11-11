@@ -3,12 +3,12 @@ Email management routes - support multiple emails per user
 """
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import selectinload
 from typing import List
 from pydantic import BaseModel
 from app.database import get_db
-from app.models import User, UserEmail
+from app.models import TriageResult, User, UserEmail
 from app.routes.auth import get_current_user_id
 from datetime import datetime
 
@@ -131,6 +131,9 @@ async def delete_email(
     db: AsyncSession = Depends(get_db)
 ):
     """Delete an email account (and its associated OAuth token)"""
+    user = await db.get(User, user_id, with_for_update=True)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
     # Get the email
     result = await db.execute(
         select(UserEmail)
@@ -154,20 +157,20 @@ async def delete_email(
             detail="Cannot delete the last email account. Please add another email first."
         )
     
-    # If it's primary, set another email as primary
+    remaining = [account for account in all_emails if account.id != email_id]
     if email.is_primary:
-        other_email = next((e for e in all_emails if e.id != email_id), None)
-        if other_email:
-            other_email.is_primary = True
-            user = await db.get(User, user_id)
-            if user:
-                user.primary_email = other_email.email
+        remaining[0].is_primary = True
+        user.primary_email = remaining[0].email
     
     # Delete the email (CASCADE will delete associated OAuth token)
+    await db.execute(delete(TriageResult).where(
+        TriageResult.user_id == user_id, TriageResult.email == email.email
+    ))
     await db.delete(email)
     await db.commit()
     
-    return {"message": "Email deleted successfully"}
+    return {"message": "Email deleted successfully", "primary_email": user.primary_email,
+            "emails": [EmailResponse.model_validate(account) for account in remaining]}
 
 
 @router.get("/emails/{email_id}")

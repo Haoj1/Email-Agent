@@ -5,12 +5,12 @@ import { api } from '../services/api';
 import EmailThreadsCard from '../components/dashboard/EmailThreadsCard';
 import './Dashboard.css';
 
-function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
+function EmailThreadsPage({ user, selectedEmail, promotions, onPromotionsChange }) {
   const location = useLocation();
   const navigationType = useNavigationType();
   const { getCachedThreads, setCachedThreads, triageLastComplete, rememberReturnView, getReturnView } = useEmailCache();
   const saved = navigationType === 'POP' ? getReturnView(location.key) : null;
-  const [restored] = useState(() => saved?.email === selectedEmail ? saved : null);
+  const [restored] = useState(() => saved?.email === selectedEmail && saved?.promotions === promotions ? saved : null);
   const [emailThreads, setEmailThreads] = useState(restored?.results || null);
   const [loadingThreads, setLoadingThreads] = useState(false);
   const threadsRequest = useRef(null);
@@ -48,19 +48,20 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
     isLoadMore = false,
     days = daysFilter,
     query = searchQuery,
-    mode = searchMode
+    mode = searchMode,
+    promotionFilter = promotions
   ) => {
     const trimmedQuery = (query || '').trim();
     const previous = threadsRequest.current;
     previous?.controller.abort();
     const controller = new AbortController();
-    threadsRequest.current = { email, controller, query: trimmedQuery, mode };
+    threadsRequest.current = { email, controller, query: trimmedQuery, mode, promotions: promotionFilter };
 
 
     if (!forceRefresh && !isLoadMore && !trimmedQuery) {
       const cached = getCachedThreads(email);
       // Only use cache if it matches current days filter
-      if (cached && cached.days === days) {
+      if (cached && cached.days === days && cached.promotions === promotionFilter) {
         setLoadingThreads(false);
         setEmailThreads(cached);
         setEmailThreadsNextPageToken(cached.data?.next_page_token || null);
@@ -71,11 +72,11 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
     setLoadingThreads(true);
     if (!isLoadMore) {
       setEmailThreadsNextPageToken(null);
-      if (previous?.email !== email) setEmailThreads(null);
+      if (previous?.email !== email || previous?.promotions !== promotionFilter) setEmailThreads(null);
     }
     
     try {
-      const params = { max_results: 30, days: days || 14 };
+      const params = { max_results: 30, days: days || 14, promotions: promotionFilter };
       if (email) params.email = email;
       if (trimmedQuery) {
         params.q = trimmedQuery;
@@ -97,6 +98,7 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
       const threadsData = { 
         success: true, 
         days: days,
+        promotions: promotionFilter,
         data: { ...newData, threads: mergedThreads } 
       };
       
@@ -137,12 +139,18 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
     loadEmailThreads(selectedEmail, true, false, daysFilter, '');
   };
 
+  const handlePromotionsChange = value => {
+    onPromotionsChange(value);
+    loadEmailThreads(selectedEmail, false, false, daysFilter, threadsRequest.current?.query,
+      threadsRequest.current?.mode, value);
+  };
+
   const handleOpenThread = (threadId) => {
     const params = new URLSearchParams();
     if (selectedEmail) params.set('email', selectedEmail);
     rememberReturnView(location.key, {
       email: selectedEmail, results: emailThreads, nextPage: emailThreadsNextPageToken,
-      days: daysFilter, query: searchQuery, mode: searchMode,
+      days: daysFilter, query: searchQuery, mode: searchMode, promotions,
     });
     navigate(`/thread/${threadId}?${params.toString()}`, { state: { backTo: location.pathname } });
   };
@@ -159,11 +167,13 @@ function EmailThreadsPage({ user, selectedEmail, onSelectEmail, onLogout }) {
           daysFilter={daysFilter}
           onDaysFilterChange={handleDaysFilterChange}
           searchQuery={searchQuery}
-            searchMode={searchMode}
-            onSearchModeChange={handleSearchModeChange}
+          searchMode={searchMode}
+          onSearchModeChange={handleSearchModeChange}
           onSearchChange={handleSearchChange}
           onSearchSubmit={handleSearchSubmit}
           onClearSearch={handleClearSearch}
+          promotions={promotions}
+          onPromotionsChange={handlePromotionsChange}
         />
       </div>
     </div>

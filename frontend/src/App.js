@@ -1,10 +1,11 @@
-import React, { lazy, Suspense, useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import React, { lazy, Suspense, useState, useEffect, useLayoutEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigationType } from 'react-router-dom';
 import { EmailCacheProvider, useEmailCache } from './contexts/EmailCacheContext';
 import { api } from './services/api';
 import Navigation from './components/dashboard/Navigation';
 import Login from './pages/Login';
 import AuthCallback from './pages/AuthCallback';
+import { AuthStatus } from './components/AuthFrame';
 import Dashboard from './pages/Dashboard';
 import './App.css';
 import './Workspace.css';
@@ -12,12 +13,19 @@ import './Workspace.css';
 const loadThreads = () => import('./pages/EmailThreads');
 const loadPriority = () => import('./pages/EmailTriage');
 const loadFollowUps = () => import('./pages/FollowUps');
+const loadCalendar = () => import('./components/dashboard/SuggestedScheduleCard');
+const loadAssistant = () => import('./components/assist/AssistChatPanel');
 const FollowUpsPage = lazy(loadFollowUps);
 const EmailThreadsPage = lazy(loadThreads);
 const EmailTriagePage = lazy(loadPriority);
+const CalendarPage = lazy(loadCalendar);
+const AssistantPage = lazy(loadAssistant);
 
 function preloadTab(path) {
-  const load = path === '/threads' ? loadThreads : path === '/triage' ? loadPriority : path === '/follow-ups' ? loadFollowUps : null;
+  const load = {
+    '/threads': loadThreads, '/triage': loadPriority, '/follow-ups': loadFollowUps,
+    '/calendar': loadCalendar, '/assistant': loadAssistant,
+  }[path];
   load?.().catch(() => {});
 }
 const ThreadDetail = lazy(() => import('./pages/ThreadDetail'));
@@ -34,11 +42,47 @@ function initialTheme() {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
+function WorkspaceView({ children, activeMailbox, mailboxCount }) {
+  const { pathname } = useLocation();
+  const navigationType = useNavigationType();
+  const showAssistant = pathname === '/assistant';
+  const [assistantVisited, setAssistantVisited] = useState(showAssistant);
+  useEffect(() => {
+    if (showAssistant) setAssistantVisited(true);
+  }, [showAssistant]);
+  useLayoutEffect(() => {
+    if (navigationType !== 'POP') window.scrollTo(0, 0);
+  }, [pathname, navigationType]);
+  return (
+    <main className="workspace-main">
+      {(showAssistant || assistantVisited) && (
+        <div className="workspace-route workspace-tool-page assistant-workspace" hidden={!showAssistant}>
+          <Suspense fallback={pageLoading}>
+            <AssistantPage embedded isOpen={showAssistant} selectedEmail={activeMailbox} mailboxCount={mailboxCount} />
+          </Suspense>
+        </div>
+      )}
+      {!showAssistant && <div className="workspace-route" key={pathname}>{children}</div>}
+    </main>
+  );
+}
+
 // Inner component that has access to EmailCache context
 function AppContent() {
   const { runTriage, cancelTriage, clearCache, reviewUnclear, noteServerSync } = useEmailCache();
   const [user, setUser] = useState(null);
   const [theme, setTheme] = useState(initialTheme);
+  const [promotions, setPromotions] = useState(() => {
+    try {
+      const value = localStorage.getItem('emailAgentPromotions');
+      if (value === 'all' || value === 'only') return value;
+    } catch {}
+    return 'hide';
+  });
+  const changePromotions = value => {
+    setPromotions(value);
+    try { localStorage.setItem('emailAgentPromotions', value); } catch {}
+  };
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
@@ -138,14 +182,25 @@ function AppContent() {
     }
   };
 
-  if (loading) return <div className="loading">Loading...</div>;
+  const disconnectMailbox = async id => {
+    const { data } = await api.delete(`/emails/${id}`);
+    setUser(current => ({ ...current, emails: data.emails, primary_email: data.primary_email }));
+    if (selectedEmail && !data.emails.some(mailbox => mailbox.email === selectedEmail)) {
+      setSelectedEmail(null);
+      try { localStorage.removeItem('selectedEmail'); } catch {}
+    }
+    clearCache();
+  };
+
+  const activeMailbox = selectedEmail || user?.primary_email || user?.emails?.[0]?.email;
 
   return (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <div className="App" data-theme={theme}>
-        <Routes>
+        {loading ? <AuthStatus title={window.location.pathname === '/auth/callback' ? 'Finishing sign-in…' : 'Opening Email Agent…'}
+          description="Checking your session." /> : <Routes>
           <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
-          <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/auth/callback" element={<AuthCallback authenticated={Boolean(user?.authenticated)} />} />
           <Route path="/privacy" element={<Suspense fallback={pageLoading}><PrivacyPolicy /></Suspense>} />
           <Route path="/terms" element={<Suspense fallback={pageLoading}><TermsOfService /></Suspense>} />
           {user ? (
@@ -160,9 +215,10 @@ function AppContent() {
                     user={user}
                     selectedEmail={selectedEmail}
                     onSelectEmail={handleSelectEmail}
+                    onDisconnect={disconnectMailbox}
                     onLogout={handleLogout}
                   />
-                  <main className="workspace-main">
+                  <WorkspaceView activeMailbox={activeMailbox} mailboxCount={user.emails?.length || 0}>
                     <Suspense fallback={pageLoading}>
                       <Routes>
                         <Route
@@ -171,8 +227,7 @@ function AppContent() {
                             <Dashboard
                               user={user}
                               selectedEmail={selectedEmail}
-                              onSelectEmail={handleSelectEmail}
-                              onLogout={handleLogout}
+                              promotions={promotions}
                             />
                           }
                         />
@@ -182,8 +237,8 @@ function AppContent() {
                             <EmailThreadsPage
                               user={user}
                               selectedEmail={selectedEmail}
-                              onSelectEmail={handleSelectEmail}
-                              onLogout={handleLogout}
+                              promotions={promotions}
+                              onPromotionsChange={changePromotions}
                             />
                           }
                         />
@@ -198,19 +253,23 @@ function AppContent() {
                             />
                           }
                         />
-                        <Route path="/follow-ups" element={<FollowUpsPage email={selectedEmail || user.primary_email || user.emails?.[0]?.email} />} />
+                        <Route path="/follow-ups" element={<FollowUpsPage email={activeMailbox} />} />
+                        <Route path="/calendar" element={<div className="workspace-tool-page workspace-schedule-panel">
+                          <h1>Calendar</h1>
+                          <CalendarPage selectedEmail={activeMailbox} />
+                        </div>} />
                         <Route path="/thread/:threadId" element={<ThreadDetail primaryEmail={user.primary_email} userId={user.user_id} />} />
                         <Route path="*" element={<Navigate to="/dashboard" replace />} />
                       </Routes>
                     </Suspense>
-                  </main>
+                  </WorkspaceView>
                 </div>
               }
             />
           ) : (
             <Route path="*" element={<Navigate to="/" replace />} />
           )}
-        </Routes>
+        </Routes>}
       </div>
     </Router>
   );

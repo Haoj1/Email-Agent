@@ -2,6 +2,7 @@ import WorkspaceIcon from '../components/workspace/WorkspaceIcon';
 import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { Link, useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import FollowUpEditor from '../components/followups/FollowUpEditor';
+import EmailBody from '../components/thread/EmailBody';
 import { api } from '../services/api';
 import { useEmailCache } from '../contexts/EmailCacheContext';
 import { findRelatedThreads } from '../utils/relatedThreads';
@@ -14,9 +15,10 @@ function ThreadDetail({ primaryEmail, userId }) {
   const navigate = useNavigate();
   const location = useLocation();
   const returnPath = location.state?.backTo;
-  const returnPage = ["/dashboard", "/threads", "/triage", "/follow-ups"].find(path => returnPath?.split("?")[0] === path);
+  const returnPage = ["/dashboard", "/threads", "/triage", "/follow-ups", "/calendar", "/assistant"].find(path => returnPath?.split("?")[0] === path);
   const back = () => { if (returnPage) navigate(-1); else navigate("/dashboard"); };
-  const backLabel = { "/threads": "Inbox", "/triage": "Needs attention", "/follow-ups": "Follow-ups" }[returnPage] || "Home";
+  const backLabel = { "/threads": "Inbox", "/triage": "Needs attention", "/follow-ups": "Follow-ups",
+    "/calendar": "Calendar", "/assistant": "Assistant" }[returnPage] || "Home";
   const [searchParams] = useSearchParams();
   const email = searchParams.get('email');
   const { getCachedThreads } = useEmailCache();
@@ -243,19 +245,7 @@ function ThreadDetail({ primaryEmail, userId }) {
                 </div>
               )}
 
-              <div className="message-body">
-                {message.body ? (
-                  <div className="body-text">
-                    {message.body.split('\n').map((line, lineIndex) => (
-                      <div key={lineIndex}>{line || '\u00A0'}</div>
-                    ))}
-                  </div>
-                ) : message.snippet ? (
-                  <div className="body-snippet">{message.snippet}</div>
-                ) : (
-                  <div className="body-snippet">(No content)</div>
-                )}
-              </div>
+              <EmailBody message={message} />
             </div>
           );
         })}

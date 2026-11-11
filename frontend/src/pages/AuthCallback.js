@@ -1,73 +1,41 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import './AuthCallback.css';
+import React, { useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { AuthStatus } from '../components/AuthFrame';
 
-function AuthCallback() {
-  const [searchParams] = useSearchParams();
+export default function AuthCallback({ authenticated }) {
+  const [params] = useSearchParams();
   const navigate = useNavigate();
-  const [status, setStatus] = useState('processing');
-  const [message, setMessage] = useState('Processing authentication...');
+  const addingMailbox = params.get('action') === 'add_email';
+  const completed = params.get('success') === 'true' && authenticated;
 
   useEffect(() => {
-    const success = searchParams.get('success');
-    const error = searchParams.get('error');
-    const email = searchParams.get('email');
-    const action = searchParams.get('action');
+    if (!completed) return;
+    const timer = window.setTimeout(() => navigate('/dashboard', { replace: true }), 850);
+    return () => window.clearTimeout(timer);
+  }, [completed, navigate]);
 
-    if (success === 'true') {
-      setStatus('success');
-      if (action === 'add_email') {
-        setMessage(`Successfully added email: ${email}`);
-      } else {
-        setMessage(`Successfully authenticated as ${email}`);
-      }
-      // Redirect to dashboard after 1.5 seconds
-      setTimeout(() => {
-        // Force a full check of auth state
-        window.location.href = '/dashboard';
-      }, 1500);
-    } else {
-      setStatus('error');
-      setMessage(error || 'Authentication failed');
-    }
-  }, [searchParams, navigate]);
+  if (completed) {
+    return (
+      <AuthStatus tone="success" title={addingMailbox ? 'Mailbox connected' : 'You’re signed in'}
+        description="Opening your workspace…">
+        <Link className="auth-primary" to="/dashboard" replace>Open workspace</Link>
+      </AuthStatus>
+    );
+  }
 
+  const reason = params.get('error');
+  const description = reason === 'access_denied'
+    ? 'Google authorization was cancelled. You can try again.'
+    : reason === 'Sign-in expired. Start sign-in again.'
+      ? 'Your sign-in session expired. Start again when you’re ready.'
+      : authenticated ? 'Return to your workspace and try connecting the mailbox again.'
+        : 'Return to sign-in and try connecting with Google again.';
   return (
-    <div className="callback-container">
-      <div className="callback-card">
-        {status === 'processing' && (
-          <>
-            <div className="spinner"></div>
-            <h2>Processing...</h2>
-            <p>{message}</p>
-          </>
-        )}
-        
-        {status === 'success' && (
-          <>
-            <div className="success-icon">✓</div>
-            <h2>Success!</h2>
-            <p>{message}</p>
-            <p className="redirect-message">Redirecting to dashboard...</p>
-          </>
-        )}
-        
-        {status === 'error' && (
-          <>
-            <div className="error-icon">✗</div>
-            <h2>Authentication Failed</h2>
-            <p>{message}</p>
-            <button 
-              className="btn-primary"
-              onClick={() => navigate('/')}
-            >
-              Back to Login
-            </button>
-          </>
-        )}
-      </div>
-    </div>
+    <AuthStatus tone="error" title={authenticated ? 'Couldn’t connect the mailbox' : 'Couldn’t finish sign-in'}
+      description={description}>
+      <Link className="auth-primary" to={authenticated ? '/dashboard' : '/'} replace>
+        {authenticated ? 'Back to workspace' : 'Back to sign-in'}
+      </Link>
+    </AuthStatus>
   );
 }
-
-export default AuthCallback;

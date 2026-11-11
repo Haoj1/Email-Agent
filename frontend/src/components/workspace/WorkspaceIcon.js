@@ -17,6 +17,7 @@ const paths = {
   refresh: 'M20 11a8 8 0 1 0-2 6m2-12v6h-6',
   add: 'M12 5v14M5 12h14',
   close: 'm6 6 12 12M18 6 6 18',
+  check: 'm5 12 4 4L19 6',
   history: 'M4 11a8 8 0 1 1 2.3 6.7M4 5v6h6m2-3v4l3 2',
   trash: 'M4 6h16m-10 0V4h4v2m-8 0 1 14h10l1-14m-8 4v6m4-6v6',
   send: 'm4 4 16 8-16 8 3-8-3-8Zm3 8h13',

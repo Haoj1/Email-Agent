@@ -12,6 +12,7 @@ function senderName(value) {
 export default function EmailThreadsCard({
   loadingThreads, onLoadMore, hasMore, emailThreads, onOpenThread,
   daysFilter, onDaysFilterChange, searchQuery, onSearchChange, onSearchSubmit, onClearSearch, searchMode, onSearchModeChange,
+  promotions, onPromotionsChange,
 }) {
   const isStandalonePage = useLocation().pathname === '/threads';
   const searchInput = useRef(null);
@@ -60,13 +61,23 @@ export default function EmailThreadsCard({
             <option value={7}>Last week</option><option value={14}>Last 2 weeks</option><option value={30}>Last month</option>
           </select>
         </label>
+        <label className="workspace-filter">
+          <span className="workspace-sr-only">Promotions visibility</span>
+          <select value={promotions} onChange={event => onPromotionsChange(event.target.value)}>
+            <option value="hide">Hide promotions</option>
+            <option value="all">All mail</option>
+            <option value="only">Promotions only</option>
+          </select>
+        </label>
         <span role="status">{loadingThreads ? 'Loading…' : `${threads.length} conversation${threads.length === 1 ? '' : 's'}`}</span>
       </div>
       {searchMode === 'fuzzy' && <p className="workspace-search-hint">
         Looks for close spellings in the latest 30 email subjects, senders, and previews.
       </p>}
       {emailThreads?.success === false && <p className="workspace-error" role="alert">{emailThreads.error}</p>}
-      {emailThreads?.success && threads.length === 0 && <p className="workspace-empty">No conversations found in this view.</p>}
+      {!loadingThreads && emailThreads?.success && threads.length === 0 && <p className="workspace-empty">
+        {promotions === 'only' ? 'No promotions found in this view.' : 'No conversations found in this view.'}
+      </p>}
       <ul className="conversation-list">
         {threads.map((thread, index) => {
           const sender = senderName(thread.from);

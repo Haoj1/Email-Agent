@@ -28,7 +28,7 @@ class SyncRequest(BaseModel):
     email: Optional[str] = None
 
 
-def _list_gmail_threads(credentials, max_results, days, q, page_token):
+def _list_gmail_threads(credentials, max_results, days, q, page_token, hide_promotions=False):
     details, next_page_token, total = GmailService(credentials).list_thread_page(
         max_results, days, query=q, page_token=page_token
     )
@@ -41,6 +41,9 @@ def _list_gmail_threads(credentials, max_results, days, q, page_token):
 
             # Get the latest message
             latest_message = messages[-1]
+            labels = latest_message.get('labelIds', [])
+            if hide_promotions and 'CATEGORY_PROMOTIONS' in labels:
+                continue
             headers = latest_message.get('payload', {}).get('headers', [])
 
             from_header = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
@@ -56,7 +59,7 @@ def _list_gmail_threads(credentials, max_results, days, q, page_token):
                 "date": date_header,
                 "snippet": latest_message.get('snippet', ''),
                 "message_count": len(messages),
-                "label_ids": latest_message.get('labelIds', [])
+                "label_ids": labels
             })
         except Exception as e:
             print(f"Gmail metadata normalization failed: {type(e).__name__}")
@@ -80,6 +83,7 @@ async def get_email_threads(
     page_token: Optional[str] = Query(None, description="Page token for pagination"),
     q: Optional[str] = Query(None, max_length=500, description="Gmail search query"),
     mode: Literal["exact", "fuzzy"] = "exact",
+    promotions: Literal["all", "hide", "only"] = "all",
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -90,18 +94,27 @@ async def get_email_threads(
     try:
         # Get credentials
         credentials = await get_user_credentials(request, email, db)
-        if mode == "fuzzy" and q and q.strip():
+        q = q.strip() if q else None
+        hide_promotions = promotions == "hide"
+        category = {"hide": "-category:promotions", "only": "category:promotions"}.get(promotions)
+        if mode == "fuzzy" and q:
             if len(q) > 200:
                 raise HTTPException(status_code=400, detail="Use a short keyword or sender name for fuzzy search.")
             threads, scanned = await asyncio.to_thread(
-                fuzzy_search, GmailService(credentials), q, days, max_results
+                fuzzy_search, GmailService(credentials), q, days, max_results,
+                category_query=category, hide_promotions=hide_promotions,
             )
             return {
                 "success": True, "threads": threads, "thread_count": len(threads),
                 "total_estimated": len(threads), "next_page_token": None,
                 "search_mode": "fuzzy", "scanned": scanned,
             }
-        return await asyncio.to_thread(_list_gmail_threads, credentials, max_results, days, q, page_token)
+        if category:
+            after = (datetime.now() - timedelta(days=days)).strftime("%Y/%m/%d")
+            q = f"({q}) {category}" if q else f"after:{after} {category}"
+        return await asyncio.to_thread(
+            _list_gmail_threads, credentials, max_results, days, q, page_token, hide_promotions
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -202,22 +215,7 @@ async def get_thread_detail(
                 subject_header = next((h['value'] for h in headers if h['name'] == 'Subject'), '(No Subject)')
                 date_header = next((h['value'] for h in headers if h['name'] == 'Date'), 'Unknown')
                 
-                # Get message body
-                body = ""
-                payload = msg.get('payload', {})
-                if 'parts' in payload:
-                    for part in payload['parts']:
-                        if part.get('mimeType') == 'text/plain':
-                            body_data = part.get('body', {}).get('data', '')
-                            if body_data:
-                                import base64
-                                body = base64.urlsafe_b64decode(body_data).decode('utf-8', errors='ignore')
-                                break
-                elif payload.get('mimeType') == 'text/plain':
-                    body_data = payload.get('body', {}).get('data', '')
-                    if body_data:
-                        import base64
-                        body = base64.urlsafe_b64decode(body_data).decode('utf-8', errors='ignore')
+                body, body_html = GmailService.extract_body(msg.get('payload', {}))
                 
                 message_list.append({
                     "message_id": msg['id'],
@@ -227,6 +225,7 @@ async def get_thread_detail(
                     "date": date_header,
                     "snippet": msg.get('snippet', ''),
                     "body": body,
+                    "body_html": body_html,
                     "label_ids": msg.get('labelIds', [])
                 })
             
