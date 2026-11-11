@@ -10,7 +10,7 @@ import './ThreadDetail.css';
 
 const ThreadChatPanel = lazy(() => import('../components/thread/ThreadChatPanel'));
 
-function ThreadDetail({ primaryEmail, userId }) {
+function ThreadDetail({ primaryEmail, userId, theme }) {
   const { threadId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -245,7 +245,7 @@ function ThreadDetail({ primaryEmail, userId }) {
                 </div>
               )}
 
-              <EmailBody message={message} />
+              <EmailBody message={message} theme={theme} />
             </div>
           );
         })}

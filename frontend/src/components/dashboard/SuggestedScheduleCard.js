@@ -148,7 +148,7 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
           start,
           end,
           display: 'background',
-          backgroundColor: 'rgba(60, 64, 67, 0.12)',
+          backgroundColor: 'var(--outline)',
           overlap: true,
           editable: false,
           extendedProps: { kind: 'busy' },
@@ -167,9 +167,9 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
         editable: true,
         durationEditable: true,
         startEditable: true,
-        backgroundColor: checked ? '#7b1fa2' : 'rgba(123, 31, 162, 0.35)',
-        borderColor: checked ? '#6a1b9a' : 'rgba(123, 31, 162, 0.55)',
-        textColor: checked ? 'var(--panel, #fff)' : '#2b0a3d',
+        backgroundColor: checked ? 'var(--accent)' : 'var(--soft)',
+        borderColor: checked ? 'var(--accent)' : 'var(--outline)',
+        textColor: checked ? 'var(--accent-ink)' : 'var(--ink)',
         extendedProps: {
           kind: 'suggestion',
           thread_id: s.thread_id,
@@ -402,15 +402,15 @@ export default function SuggestedScheduleCard({ selectedEmail }) {
               </div>
               <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                  <span style={{ width: 10, height: 10, borderRadius: 2, background: '#7b1fa2', display: 'inline-block' }} />
+                  <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--accent)', display: 'inline-block' }} />
                   <span style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>Selected</span>
                 </div>
                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                  <span style={{ width: 10, height: 10, borderRadius: 2, background: 'rgba(123, 31, 162, 0.35)', display: 'inline-block' }} />
+                  <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--soft)', border: '1px solid var(--outline)', display: 'inline-block' }} />
                   <span style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>Not selected</span>
                 </div>
                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                  <span style={{ width: 10, height: 10, borderRadius: 2, background: 'rgba(60, 64, 67, 0.12)', display: 'inline-block' }} />
+                  <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--outline)', opacity: 0.7, display: 'inline-block' }} />
                   <span style={{ fontSize: '0.85em', color: 'var(--muted, #666)' }}>Busy</span>
                 </div>
               </div>
