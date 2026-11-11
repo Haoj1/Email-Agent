@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 import base64
 import re
 import email.utils
+from html import unescape
 
 from app.services.telemetry import timed_operation
 
@@ -127,6 +128,16 @@ class GmailService:
             format='full'
         ).execute()
     
+    def get_message_text(self, message_id: str) -> str:
+        message = self.service.users().messages().get(
+            userId="me", id=message_id, format="full", fields="payload",
+        ).execute()
+        body, html = self.extract_body(message.get("payload", {}))
+        if not body and html:
+            html = re.sub(r"<(script|style)\b[^>]*>.*?</\1\s*>", " ", html, flags=re.I | re.S)
+            body = unescape(re.sub(r"<[^>]+>", " ", html))
+        return " ".join(body.split())
+
     def normalize_thread(self, thread_data: Dict, *, message_limit: Optional[int] = None) -> Dict:
         """
         Normalize Gmail thread data to internal Thread schema

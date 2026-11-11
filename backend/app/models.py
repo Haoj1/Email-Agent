@@ -16,6 +16,8 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     primary_email = Column(String, nullable=True, index=True)  # Primary email for initial login identification (nullable for flexibility)
     timezone = Column(String, nullable=True)
+    ai_review_mode = Column(String(24), nullable=False, server_default="off")
+    ai_review_since = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Relationships
@@ -232,6 +234,7 @@ class TriageResult(Base):
     key_points = Column(JSONB, nullable=True)
     message_count = Column(Integer, nullable=True)  # Number of messages in thread when triaged (for smart updates)
     ai_reviewed = Column(Boolean, nullable=False, server_default="false")
+    ai_reviewed_through_ms = Column(BigInteger, nullable=False, server_default="0")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     

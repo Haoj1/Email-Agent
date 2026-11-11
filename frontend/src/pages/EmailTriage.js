@@ -5,11 +5,9 @@ import { api } from '../services/api';
 import EmailTriageCard from '../components/dashboard/EmailTriageCard';
 import './Dashboard.css';
 
-function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
+function EmailTriagePage({ user, selectedEmail, onAiReviewChange }) {
   const { 
     triageRunning,
-    reviewUnclear,
-    setReviewUnclear,
     triageProgress,
     triageStatus,
     triageLastComplete,
@@ -124,10 +122,10 @@ function EmailTriagePage({ user, selectedEmail, onSelectEmail, onLogout }) {
           triageResults={triageResults}
           triageProgress={triageProgress}
           triageLastComplete={triageLastComplete}
-            hasMailboxes={Boolean(user?.emails?.length)}
+          hasMailboxes={Boolean(user?.emails?.length)}
           triageLastError={triageLastError}
-            reviewUnclear={reviewUnclear}
-            onReviewUnclearChange={setReviewUnclear}
+          aiReviewMode={user?.ai_review_mode || 'off'}
+          onAiReviewChange={onAiReviewChange}
           triageStatus={triageStatus}
           triageAccountInfo={triageAccountInfo}
           daysFilter={triageDaysFilter}

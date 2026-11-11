@@ -13,9 +13,14 @@ async def write_triage_results(db, rows):
         constraint="unique_user_thread_triage",
         set_={field: getattr(statement.excluded, field) for field in (
             "email", "label", "priority", "summary", "key_points", "message_count", "ai_reviewed"
-        )} | {"updated_at": func.now()},
+        )} | {
+            "ai_reviewed_through_ms": func.greatest(
+                TriageResult.ai_reviewed_through_ms, statement.excluded.ai_reviewed_through_ms
+            ),
+            "updated_at": func.now(),
+        },
         where=(TriageResult.message_count.is_(None) |
                (TriageResult.message_count < statement.excluded.message_count) |
                ((TriageResult.message_count == statement.excluded.message_count) &
-                (TriageResult.label == "REVIEW") & ~TriageResult.ai_reviewed & statement.excluded.ai_reviewed)),
+                (TriageResult.ai_reviewed_through_ms < statement.excluded.ai_reviewed_through_ms))),
     ))

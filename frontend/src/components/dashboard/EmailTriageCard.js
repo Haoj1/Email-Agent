@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import WorkspaceIcon from '../workspace/WorkspaceIcon';
 import { Link, useLocation } from 'react-router-dom';
 
@@ -10,12 +10,26 @@ export function PriorityBadge({ priority }) {
 
 export default function EmailTriageCard({
   runningTriage, loadingTriageResults, triageResults, triageProgress, triageStatus,
-  triageAccountInfo, triageLastComplete, triageLastError, hasMailboxes, reviewUnclear, onReviewUnclearChange,
+  triageAccountInfo, triageLastComplete, triageLastError, hasMailboxes, aiReviewMode, onAiReviewChange,
   daysFilter, onDaysFilterChange, onLoadMore, onOpenThread,
 }) {
   const isStandalonePage = useLocation().pathname === '/triage';
   const results = triageResults?.data?.results || [];
   const busy = runningTriage || loadingTriageResults;
+  const [savingMode, setSavingMode] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
+
+  const changeReviewMode = async mode => {
+    setSavingMode(true);
+    setSaveFailed(false);
+    try {
+      await onAiReviewChange(mode);
+    } catch {
+      setSaveFailed(true);
+    } finally {
+      setSavingMode(false);
+    }
+  };
 
   return (
     <section id="priority-inbox" className="card workspace-card priority-card" aria-labelledby="priorities-title">
@@ -38,11 +52,21 @@ export default function EmailTriageCard({
       </div>
       {hasMailboxes && <details className="workspace-email-options">
         <summary>Email summary options</summary>
-        <label className="workspace-ai-review">
-          <input type="checkbox" checked={reviewUnclear} disabled={runningTriage}
-            onChange={event => onReviewUnclearChange(event.target.checked)} />
-          <span>Use AI for new unclear emails <small>When enabled, Copilot reviews new email previews in batches.</small></span>
-        </label>
+        <div className="workspace-ai-review">
+          <label className="workspace-filter">
+            <span>AI review</span>
+            <select value={aiReviewMode} disabled={savingMode} aria-describedby="ai-review-help"
+              onChange={event => changeReviewMode(event.target.value)}>
+              <option value="off">Off</option>
+              <option value="unclear">New unclear emails</option>
+              <option value="primary_important">New Primary or Important emails</option>
+            </select>
+          </label>
+          <small id="ai-review-help">Saved to your account. AI reviews new mail while Email Agent is open.
+            Primary or Important mode uses previews first, then sends a short body excerpt to DeepSeek if needed.</small>
+          {savingMode && <small role="status">Saving…</small>}
+          {saveFailed && <small className="workspace-error" role="alert">Could not save your preference. Try again.</small>}
+        </div>
       </details>}
       {runningTriage && (
         <div className="workspace-progress" role="status">

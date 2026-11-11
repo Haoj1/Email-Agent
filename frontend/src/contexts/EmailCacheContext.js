@@ -24,7 +24,6 @@ export const EmailCacheProvider = ({ children }) => {
   
   // Global triage run state (shared between Dashboard and /triage page)
   const [triageRunning, setTriageRunning] = useState(false);
-  const [reviewUnclear, setReviewUnclear] = useState(false);
   const [triageProgress, setTriageProgress] = useState({ current: 0, total: 0, progress: 0 });
   const [triageStatus, setTriageStatus] = useState('');
   const [triageLastComplete, setTriageLastComplete] = useState(null); // { run_id, ...payload }
@@ -150,13 +149,14 @@ export const EmailCacheProvider = ({ children }) => {
     });
   }, [isCacheValid]);
 
-  const runTriage = useCallback(async ({ emails, userId, days = 7 }) => {
+  const runTriage = useCallback(async ({ emails, userId, reviewMode, days = 7 }) => {
     if (!userId || !emails.length || document.visibilityState === 'hidden' || navigator.onLine === false) return;
     const storageKey = `emailAgentAutoCheck:${userId}`;
     const scan = async () => {
       if (triageAbortRef.current) return;
       let progress = scanProgress.current.get(userId);
       try { progress = JSON.parse(localStorage.getItem(storageKey)) || progress; } catch {}
+      if (progress?.reviewMode !== reviewMode) progress = null;
       if (Date.now() < (progress?.nextAt || 0)) return;
 
       const accounts = [...new Set(emails)];
@@ -177,7 +177,7 @@ export const EmailCacheProvider = ({ children }) => {
       const changedAccounts = new Set();
 
       const persist = nextAt => {
-        const value = { cursors, checkpoints, nextAt };
+        const value = { cursors, checkpoints, nextAt, reviewMode };
         scanProgress.current.set(userId, value);
         try { localStorage.setItem(storageKey, JSON.stringify(value)); } catch {}
       };
@@ -186,7 +186,7 @@ export const EmailCacheProvider = ({ children }) => {
       const scanPage = async (email, cursor) => {
         const response = await fetch(`${api.defaults.baseURL}/triage/run`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-          signal: controller.signal, body: JSON.stringify({ max_results: 25, days, email, cursor, checkpoint: checkpoints[email], automatic: true, review_unclear: reviewUnclear }),
+          signal: controller.signal, body: JSON.stringify({ max_results: 25, days, email, cursor, checkpoint: checkpoints[email], automatic: true }),
         });
         if (!response.ok || !response.body) throw new Error(`Scan failed (${response.status}).`);
         const reader = response.body.getReader();
@@ -273,7 +273,7 @@ export const EmailCacheProvider = ({ children }) => {
     } else {
       await scan();
     }
-  }, [reviewUnclear]);
+  }, []);
 
   const cancelTriage = useCallback(() => triageAbortRef.current?.abort(), []);
 
@@ -293,8 +293,6 @@ export const EmailCacheProvider = ({ children }) => {
     isCacheValid,
     // Global triage run state
     triageRunning,
-    reviewUnclear,
-    setReviewUnclear,
     triageProgress,
     triageStatus,
     triageLastComplete,
