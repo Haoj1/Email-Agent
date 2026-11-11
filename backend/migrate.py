@@ -21,7 +21,9 @@ async def migrate():
                 ))
                 await connection.execute(text(
                     "ALTER TABLE triage_results ADD COLUMN IF NOT EXISTS ai_reviewed boolean NOT NULL DEFAULT false, "
-                    "ADD COLUMN IF NOT EXISTS ai_reviewed_through_ms bigint NOT NULL DEFAULT 0"
+                    "ADD COLUMN IF NOT EXISTS ai_reviewed_through_ms bigint NOT NULL DEFAULT 0, "
+                    "ADD COLUMN IF NOT EXISTS last_inbound_at_ms bigint NOT NULL DEFAULT 0, "
+                    "ADD COLUMN IF NOT EXISTS reviewed_at timestamptz"
                 ))
                 await connection.execute(text(
                     "ALTER TABLE email_embeddings ADD COLUMN IF NOT EXISTS user_email_id integer "

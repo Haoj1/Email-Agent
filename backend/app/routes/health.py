@@ -31,8 +31,8 @@ async def readiness(db=Depends(get_db)):
             "WHERE attrelid = to_regclass('triage_results') AND attname = 'ai_reviewed' AND NOT attisdropped) "
             "AND (SELECT count(*) FROM pg_attribute WHERE attrelid = to_regclass('users') "
             "AND attname IN ('ai_review_since', 'ai_review_mode') AND NOT attisdropped) = 2 "
-            "AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('triage_results') "
-            "AND attname = 'ai_reviewed_through_ms' AND NOT attisdropped)"
+            "AND (SELECT count(*) FROM pg_attribute WHERE attrelid = to_regclass('triage_results') "
+            "AND attname IN ('ai_reviewed_through_ms', 'last_inbound_at_ms', 'reviewed_at') AND NOT attisdropped) = 3"
         ))
     try:
         if await asyncio.wait_for(check_schema(), timeout=3):

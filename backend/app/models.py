@@ -235,6 +235,8 @@ class TriageResult(Base):
     message_count = Column(Integer, nullable=True)  # Number of messages in thread when triaged (for smart updates)
     ai_reviewed = Column(Boolean, nullable=False, server_default="false")
     ai_reviewed_through_ms = Column(BigInteger, nullable=False, server_default="0")
+    last_inbound_at_ms = Column(BigInteger, nullable=False, server_default="0")
+    reviewed_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     

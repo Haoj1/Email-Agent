@@ -12,7 +12,7 @@ from app.database import AsyncSessionLocal
 from app.models import MailboxSyncState, OAuthToken, TriageResult, UserEmail
 from app.routes.auth import get_mailbox_credentials
 from app.services.background_tasks import index_pending, record_index_changes
-from app.services.follow_ups import reopen_follow_ups
+from app.services.follow_ups import latest_inbound_at, reopen_follow_ups
 from app.services.gmail_service import GmailService
 from app.services.triage_rules import classify_metadata
 from app.services.triage_store import write_triage_results
@@ -101,7 +101,8 @@ async def sync_mailbox(db, account):
             ))
         rows = [
             {**classify_metadata(thread), "user_id": account.user_id, "email": account.email,
-             "message_count": thread["message_count"], "ai_reviewed": False}
+             "message_count": thread["message_count"], "ai_reviewed": False,
+             "last_inbound_at_ms": latest_inbound_at(item, account.email)}
             for item in raw if (thread := service.normalize_thread(item, message_limit=3))
         ]
         await write_triage_results(db, rows)

@@ -12,10 +12,12 @@ export default function EmailTriageCard({
   runningTriage, loadingTriageResults, triageResults, triageProgress, triageStatus,
   triageAccountInfo, triageLastComplete, triageLastError, hasMailboxes, aiReviewMode, onAiReviewChange,
   daysFilter, onDaysFilterChange, onLoadMore, onOpenThread,
+  reviewStatus, onReviewStatusChange, reviewingId, reviewMessage, onSetReviewed,
 }) {
   const isStandalonePage = useLocation().pathname === '/triage';
   const results = triageResults?.data?.results || [];
-  const busy = runningTriage || loadingTriageResults;
+  const reviewBusy = reviewingId !== null;
+  const busy = runningTriage || loadingTriageResults || reviewBusy;
   const [savingMode, setSavingMode] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
 
@@ -42,13 +44,22 @@ export default function EmailTriageCard({
           <WorkspaceIcon name="refresh" className={runningTriage ? 'workspace-spinning' : ''} />
           {hasMailboxes ? 'Updates automatically' : 'Connect a mailbox to get updates'}
         </span>
-        <label className="workspace-filter">
-          <span className="workspace-sr-only">Priority date range</span>
-          <select value={daysFilter ?? ''} onChange={event => onDaysFilterChange(event.target.value ? Number(event.target.value) : null)}>
-            <option value="">All time</option><option value="1">Today</option><option value="3">Last 3 days</option>
-            <option value="5">Last 5 days</option><option value="7">Last week</option><option value="30">Last month</option>
-          </select>
-        </label>
+        <div className="priority-filters">
+          <div className="workspace-search-modes" role="group" aria-label="Review status">
+            <button type="button" aria-pressed={reviewStatus === 'pending'} disabled={reviewBusy}
+              onClick={() => onReviewStatusChange('pending')}>To review</button>
+            <button type="button" aria-pressed={reviewStatus === 'reviewed'} disabled={reviewBusy}
+              onClick={() => onReviewStatusChange('reviewed')}>Reviewed</button>
+          </div>
+          <label className="workspace-filter">
+            <span className="workspace-sr-only">Priority date range</span>
+            <select value={daysFilter ?? ''} disabled={reviewBusy}
+              onChange={event => onDaysFilterChange(event.target.value ? Number(event.target.value) : null)}>
+              <option value="">All time</option><option value="1">Today</option><option value="3">Last 3 days</option>
+              <option value="5">Last 5 days</option><option value="7">Last week</option><option value="30">Last month</option>
+            </select>
+          </label>
+        </div>
       </div>
       {hasMailboxes && <details className="workspace-email-options">
         <summary>Email summary options</summary>
@@ -89,7 +100,12 @@ export default function EmailTriageCard({
       </p>}
       {loadingTriageResults && !runningTriage && <p className="workspace-empty" role="status">Loading priorities…</p>}
       {triageResults?.success === false && <p className="workspace-error" role="alert">{triageResults.error}</p>}
-      {triageResults?.success && !results.length && <p className="workspace-empty">{runningTriage ? 'Checking your mailbox. Summaries will appear here.' : 'Nothing to review in this date range.'}</p>}
+      {reviewMessage && <p className={reviewMessage.error ? 'workspace-error' : 'workspace-search-hint'}
+        role={reviewMessage.error ? 'alert' : 'status'}>{reviewMessage.text}</p>}
+      {triageResults?.success && !results.length && <p className="workspace-empty">
+        {reviewStatus === 'reviewed' ? 'No reviewed conversations in this date range.'
+          : runningTriage ? 'Checking your mailbox. Summaries will appear here.' : 'Nothing to review in this date range.'}
+      </p>}
       <ul className="priority-list">
         {results.map((result, index) => {
           return (
@@ -101,7 +117,13 @@ export default function EmailTriageCard({
                 </button>
                 {result.subject && result.summary && <p>{result.summary}</p>}
                 {result.key_points?.length > 0 && <details className="priority-points"><summary>Key points</summary><ul>{result.key_points.map((point, i) => <li key={i}>{point}</li>)}</ul></details>}
-                {result.email && <small title={result.email}>{result.email}</small>}
+                <div className="priority-item-footer">
+                  {result.email && <small title={result.email}>{result.email}</small>}
+                  {result.id && <button type="button" className="workspace-quiet priority-review-action"
+                    disabled={reviewBusy || loadingTriageResults} onClick={() => onSetReviewed(result)}>
+                    {reviewingId === result.id ? 'Saving…' : reviewStatus === 'reviewed' ? 'Back to review' : 'Mark as reviewed'}
+                  </button>}
+                </div>
               </article>
             </li>
           );
