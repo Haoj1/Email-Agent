@@ -235,14 +235,14 @@
 }
 
 .chat-message.error .message-content {
-  background: #ffebee;
-  color: #c62828;
-  border-left: 3px solid #c62828;
+  background: var(--panel, #ffebee);
+  color: var(--danger, #c62828);
+  border-left: 3px solid currentColor;
 }
 
 .chat-message.draft .message-content {
-  background: #e3f2fd;
-  border-left: 3px solid #1976d2;
+  background: var(--soft, #e3f2fd);
+  border-left: 3px solid var(--accent, #1976d2);
 }
 
 .message-text {
@@ -252,20 +252,19 @@
 
 .message-text .draft-subject {
   font-weight: 600;
-  color: #333;
   margin-bottom: 8px;
   padding: 8px;
-  background: #f5f5f5;
+  background: var(--control, #f5f5f5);
   border-radius: 4px;
-  border-left: 3px solid #1976d2;
+  border-left: 3px solid var(--accent, #1976d2);
 }
 
 .message-text .draft-body {
   white-space: pre-wrap;
   padding: 12px;
-  background: #fafafa;
+  background: var(--field, #fafafa);
   border-radius: 4px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--line, #e0e0e0);
   margin-top: 8px;
   white-space: pre-wrap;
 }
@@ -400,8 +399,8 @@
 /* Thinking Steps Styles */
 .thinking-steps-container {
   padding: 12px 16px;
-  background: #f8f9fa;
-  border-left: 3px solid #1976d2;
+  background: var(--control, #f8f9fa);
+  border-left: 3px solid var(--accent, #1976d2);
   margin-bottom: 12px;
   border-radius: 4px;
 }
@@ -412,12 +411,12 @@
   gap: 10px;
   padding: 4px 0;
   font-size: 13px;
-  color: #555;
+  color: var(--ink, #555);
   animation: fadeIn 0.3s ease;
 }
 
 .thinking-step:not(:last-child) {
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--line, #e0e0e0);
   padding-bottom: 6px;
   margin-bottom: 4px;
 }
@@ -450,7 +449,7 @@
 }
 
 .thinking-args {
-  color: #666;
+  color: var(--muted, #666);
   font-size: 12px;
   font-style: italic;
 }
@@ -473,12 +472,11 @@
   margin-top: 16px;
   margin-bottom: 8px;
   font-weight: 600;
-  color: #333;
 }
 
 .message-text h1 {
   font-size: 24px;
-  border-bottom: 2px solid #e0e0e0;
+  border-bottom: 2px solid var(--line, #e0e0e0);
   padding-bottom: 8px;
 }
 
@@ -528,16 +526,16 @@
 }
 
 .message-text code {
-  background: #f5f5f5;
+  background: var(--soft, #f5f5f5);
   padding: 2px 6px;
   border-radius: 3px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--mono, monospace);
   font-size: 0.9em;
-  color: #d32f2f;
+  color: var(--accent-dark, #294c95);
 }
 
 .message-text pre {
-  background: #f5f5f5;
+  background: var(--field, #f5f5f5);
   padding: 12px;
   border-radius: 6px;
   overflow-x: auto;
@@ -547,29 +545,25 @@
 .message-text pre code {
   background: none;
   padding: 0;
-  color: #333;
+  color: inherit;
 }
 
 .message-text blockquote {
-  border-left: 4px solid #1976d2;
+  border-left: 4px solid var(--accent, #1976d2);
   padding-left: 16px;
   margin: 12px 0;
-  color: #666;
+  color: var(--muted, #666);
   font-style: italic;
 }
 
 .message-text a {
-  color: #1976d2;
-  text-decoration: none;
+  color: var(--accent-dark, #1565c0);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .message-text a:hover {
   text-decoration: underline;
-}
-
-.message-text strong {
-  font-weight: 600;
-  color: #333;
 }
 
 .message-text em {
@@ -584,13 +578,13 @@
 
 .message-text table th,
 .message-text table td {
-  border: 1px solid #ddd;
+  border: 1px solid var(--line, #ddd);
   padding: 8px 12px;
   text-align: left;
 }
 
 .message-text table th {
-  background: #f5f5f5;
+  background: var(--control, #f5f5f5);
   font-weight: 600;
 }
 
@@ -644,6 +638,11 @@
   max-height: 250px;
   min-height: 80px;
   line-height: 1.7;
+}
+
+.thread-chat-input::placeholder {
+  color: var(--muted, #666);
+  opacity: 1;
 }
 
 .thread-chat-input:focus {

@@ -227,7 +227,9 @@
 .workspace-main .btn-gmail:hover { background: var(--soft); border-color: #3f7280; }
 .workspace-main .btn-chat { background: var(--accent); color: var(--accent-ink); }
 .workspace-main .btn-chat:hover { background: var(--accent-dark); }
-.workspace-main .message-header { border-color: var(--line); }
+.workspace-main .message-item.unread { background: var(--panel); border-left-color: var(--accent); }
+.workspace-main .message-item.unread::before { background: var(--accent); }
+.workspace-main :is(.message-header, .message-body) { border-color: var(--line); }
 .workspace-main :is(.sender-name, .body-text) { color: var(--ink); }
 .workspace-main :is(.sender-email, .message-date, .message-recipients, .body-snippet, .thread-detail-container .loading) { color: var(--muted); }
 .workspace-main .body-text a { color: var(--accent); }
@@ -301,6 +303,7 @@
   --fc-page-bg-color: var(--panel);
   --fc-neutral-bg-color: var(--surface);
   --fc-today-bg-color: var(--soft);
+  --fc-bg-event-opacity: .7;
 }
 .workspace-schedule-panel :is(.test-result.error, .test-result.success) { background: var(--surface); color: var(--ink); }
 .workspace-shell .thread-chat-panel {

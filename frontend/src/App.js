@@ -258,7 +258,7 @@ function AppContent() {
                           <h1>Calendar</h1>
                           <CalendarPage selectedEmail={activeMailbox} />
                         </div>} />
-                        <Route path="/thread/:threadId" element={<ThreadDetail primaryEmail={user.primary_email} userId={user.user_id} />} />
+                        <Route path="/thread/:threadId" element={<ThreadDetail primaryEmail={user.primary_email} userId={user.user_id} theme={theme} />} />
                         <Route path="*" element={<Navigate to="/dashboard" replace />} />
                       </Routes>
                     </Suspense>

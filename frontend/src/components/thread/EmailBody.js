@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import DOMPurify from 'dompurify';
 
-function formatDocument(html, loadImages) {
+const darkReadingFilter = 'invert(1) hue-rotate(180deg)';
+
+function formatDocument(html, loadImages, darkReading) {
   const document = DOMPurify.sanitize(html, {
     WHOLE_DOCUMENT: true,
     RETURN_DOM: true,
@@ -51,16 +53,25 @@ function formatDocument(html, loadImages) {
   referrer.content = 'no-referrer';
   head.prepend(referrer);
   const defaults = document.ownerDocument.createElement('style');
-  defaults.textContent = 'body{margin:16px;color:#202124;background:#fff;font:14px/1.5 system-ui,sans-serif;overflow-wrap:anywhere} img{max-width:100%;height:auto} table{max-width:100%}';
+  defaults.textContent = 'html{color-scheme:light;background:#fff} body{margin:16px;color:#202124;background:#fff;font:14px/1.5 system-ui,sans-serif;overflow-wrap:anywhere} img{max-width:100%;height:auto} table{max-width:100%}';
   head.insertBefore(defaults, meta.nextSibling);
+  if (darkReading) {
+    // Transform the isolated document so each sender's text and background change together.
+    document.style.setProperty('filter', darkReadingFilter, 'important');
+    for (const image of document.querySelectorAll('img[src]')) {
+      image.style.setProperty('filter', darkReadingFilter, 'important');
+    }
+  }
   return { source: '<!doctype html>' + document.outerHTML, hasRemoteImages };
 }
 
-export default function EmailBody({ message }) {
+export default function EmailBody({ message, theme }) {
   const [showText, setShowText] = useState(false);
   const [loadImages, setLoadImages] = useState(false);
-  const formatted = useMemo(() => message.body_html ? formatDocument(message.body_html, loadImages) : null,
-    [message.body_html, loadImages]);
+  const [originalColors, setOriginalColors] = useState(false);
+  const darkReading = theme === 'dark' && !originalColors;
+  const formatted = useMemo(() => message.body_html ? formatDocument(message.body_html, loadImages, darkReading) : null,
+    [message.body_html, loadImages, darkReading]);
 
   return (
     <div className="message-body">
@@ -69,11 +80,16 @@ export default function EmailBody({ message }) {
           <button type="button" aria-pressed={!showText} onClick={() => setShowText(false)}>Formatted</button>
           <button type="button" aria-pressed={showText} onClick={() => setShowText(true)}>Plain text</button>
         </div>
-        {!showText && formatted.hasRemoteImages && !loadImages &&
-          <button className="workspace-quiet" type="button" onClick={() => setLoadImages(true)}>Load remote images</button>}
+        {!showText && <div className="email-format-actions">
+          {theme === 'dark' && <button className="workspace-quiet" type="button"
+            aria-pressed={originalColors} onClick={() => setOriginalColors(value => !value)}>Original colors</button>}
+          {formatted.hasRemoteImages && !loadImages &&
+            <button className="workspace-quiet" type="button" onClick={() => setLoadImages(true)}>Load remote images</button>}
+        </div>}
       </div>}
       {formatted && !showText ? (
-        <iframe className="formatted-email" title="Formatted email" srcDoc={formatted.source} loading="lazy"
+        <iframe className="formatted-email" data-reading-theme={darkReading ? 'dark' : 'original'}
+          title="Formatted email" srcDoc={formatted.source} loading="lazy"
           sandbox="allow-popups allow-popups-to-escape-sandbox" referrerPolicy="no-referrer" />
       ) : (
         <div className={message.body ? 'body-text' : 'body-snippet'}>

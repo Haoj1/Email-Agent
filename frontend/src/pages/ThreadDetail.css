@@ -233,6 +233,18 @@
   margin-bottom: 12px;
 }
 
+.email-format-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.email-format-actions button[aria-pressed="true"] {
+  background: var(--soft);
+  color: var(--ink);
+}
+
 .formatted-email {
   display: block;
   width: 100%;
@@ -241,6 +253,10 @@
   border-radius: 10px;
   background: white;
   color-scheme: light;
+}
+
+.formatted-email[data-reading-theme="dark"] {
+  background: var(--field, #101621);
 }
 
 .body-text {
